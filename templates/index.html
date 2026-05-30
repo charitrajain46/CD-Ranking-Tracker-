@@ -1,0 +1,2321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Collegedunia — Ranking Pipeline</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+/* ── Root Variables ─────────────────────────────────────────────────── */
+:root {
+  --bg:        #0e1117;
+  --bg2:       #161b2a;
+  --bg3:       #1d2237;
+  --bg4:       #242840;
+  --border:    #2c3252;
+  --border-lt: #3a4170;
+  --accent:    #4f72fb;
+  --accent2:   #7b96fd;
+  --green:     #10b981;
+  --green-lt:  #34d399;
+  --red:       #f04747;
+  --yellow:    #f5a623;
+  --cyan:      #22d3ee;
+  --text:      #dde3f8;
+  --text2:     #a9b3d4;
+  --muted:     #6b7699;
+  --radius:    10px;
+  --radius-lg: 14px;
+  --sidebar-w: 240px;
+  --shadow:    0 2px 16px rgba(0,0,0,.45);
+  --shadow-sm: 0 1px 6px rgba(0,0,0,.3);
+  --trans:     all 0.18s ease;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin:0; padding:0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 13.5px;
+  line-height: 1.6;
+  display: flex;
+  min-height: 100vh;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width:5px; height:5px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+::-webkit-scrollbar-thumb:hover { background:var(--border-lt); }
+
+/* ════════════════════════════════════════════════════════════════════
+   SIDEBAR
+══════════════════════════════════════════════════════════════════════ */
+.sidebar {
+  width: var(--sidebar-w);
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  position: fixed; top:0; left:0; bottom:0;
+  z-index: 100;
+}
+
+.sb-logo {
+  padding: 20px 18px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.sb-logo-icon {
+  width:40px; height:40px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border-radius: 12px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:20px; margin-bottom:10px;
+  box-shadow: 0 4px 12px rgba(79,114,251,.4);
+}
+.sb-logo h1 { font-size:13px; font-weight:700; color:var(--text); line-height:1.35; }
+.sb-logo p  { font-size:11px; color:var(--muted); margin-top:2px; }
+
+.sb-nav { flex:1; padding:10px 8px; overflow-y:auto; }
+
+.nav-group { margin-bottom:4px; }
+.nav-group-label {
+  font-size:10px; font-weight:700; color:var(--muted);
+  text-transform:uppercase; letter-spacing:.1em;
+  padding:8px 10px 3px;
+}
+.nav-item {
+  display:flex; align-items:center; gap:9px;
+  padding:8px 10px; border-radius:8px;
+  cursor:pointer; color:var(--text2);
+  font-size:13px; font-weight:500;
+  transition:var(--trans); user-select:none;
+  margin-bottom:1px;
+}
+.nav-item:hover  { background:var(--bg3); color:var(--text); }
+.nav-item.active { background:rgba(79,114,251,.18); color:var(--accent2);
+                   font-weight:600; }
+.nav-item .ni    { font-size:15px; width:20px; text-align:center; flex-shrink:0; }
+
+.sb-footer {
+  padding:12px 16px;
+  border-top:1px solid var(--border);
+  font-size:11px; color:var(--muted);
+}
+#sb-lock-status { display:flex; align-items:center; gap:6px; }
+
+/* ════════════════════════════════════════════════════════════════════
+   MAIN
+══════════════════════════════════════════════════════════════════════ */
+.main { margin-left:var(--sidebar-w); flex:1; min-width:0; display:flex; flex-direction:column; min-height:100vh; }
+
+.topbar {
+  background:var(--bg2); border-bottom:1px solid var(--border);
+  padding:0 28px;
+  height:56px; display:flex; align-items:center; justify-content:space-between;
+  position:sticky; top:0; z-index:50;
+}
+.topbar-left h2 { font-size:15px; font-weight:700; color:var(--text); }
+.topbar-left p  { font-size:11px; color:var(--muted); }
+.topbar-right   { display:flex; align-items:center; gap:10px; }
+
+.content { padding:24px 28px; max-width:1280px; width:100%; }
+/* When rankings page is active, JS adds this class to remove content padding */
+.content.rankings-active {
+  padding: 0;
+  max-width: 100%;
+}
+
+/* ── Pages ───────────────────────────────────────────────────────── */
+.page { display:none; }
+.page.active { display:block; }
+/* Rankings page overrides to flex so the table fills and scrolls internally */
+#page-rankings.active { display:flex; }
+
+/* ── Section header ──────────────────────────────────────────────── */
+.sec-head {
+  display:flex; align-items:flex-start; justify-content:space-between;
+  margin-bottom:20px; flex-wrap:wrap; gap:10px;
+}
+.sec-head-left h2 { font-size:20px; font-weight:800; }
+.sec-head-left p  { font-size:12.5px; color:var(--muted); margin-top:3px; }
+.sec-head-right   { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+
+/* ════════════════════════════════════════════════════════════════════
+   CARDS
+══════════════════════════════════════════════════════════════════════ */
+.card {
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:var(--radius-lg); padding:20px 22px;
+  margin-bottom:16px;
+}
+.card-title {
+  font-size:11px; font-weight:700; color:var(--muted);
+  text-transform:uppercase; letter-spacing:.07em; margin-bottom:14px;
+}
+
+/* ── Stat grid ───────────────────────────────────────────────────── */
+.stat-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(175px,1fr)); gap:14px; margin-bottom:16px; }
+.stat-card {
+  background:var(--bg3); border:1px solid var(--border);
+  border-radius:var(--radius); padding:16px 18px;
+  transition:var(--trans); cursor:default;
+}
+.stat-card:hover { border-color:var(--border-lt); transform:translateY(-1px); }
+.stat-label { font-size:10.5px; font-weight:600; color:var(--muted);
+              text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
+.stat-value { font-size:24px; font-weight:800; line-height:1; }
+.stat-sub   { font-size:11px; color:var(--muted); margin-top:5px; }
+
+/* ════════════════════════════════════════════════════════════════════
+   BUTTONS
+══════════════════════════════════════════════════════════════════════ */
+.btn {
+  display:inline-flex; align-items:center; gap:7px;
+  padding:9px 18px; border-radius:8px; border:none;
+  cursor:pointer; font-size:13px; font-weight:600;
+  transition:var(--trans); user-select:none; white-space:nowrap;
+}
+.btn:disabled { opacity:.45; cursor:not-allowed; }
+.btn-primary { background:var(--accent); color:#fff; }
+.btn-primary:hover:not(:disabled) { background:var(--accent2); box-shadow:0 4px 14px rgba(79,114,251,.4); }
+.btn-success { background:var(--green); color:#fff; }
+.btn-success:hover:not(:disabled) { background:var(--green-lt); }
+.btn-danger  { background:var(--red); color:#fff; }
+.btn-danger:hover:not(:disabled)  { background:#c93a3a; }
+.btn-ghost   { background:var(--bg3); color:var(--text); border:1px solid var(--border); }
+.btn-ghost:hover:not(:disabled)   { background:var(--bg4); border-color:var(--border-lt); }
+.btn-warn    { background:rgba(245,166,35,.15); color:var(--yellow); border:1px solid rgba(245,166,35,.3); }
+.btn-warn:hover:not(:disabled)    { background:rgba(245,166,35,.25); }
+.btn-sm  { padding:6px 14px; font-size:12px; border-radius:7px; }
+.btn-xs  { padding:4px 10px; font-size:11px; border-radius:6px; }
+.btn-icon{ padding:8px; border-radius:7px; }
+
+/* ════════════════════════════════════════════════════════════════════
+   STATUS PILLS & BADGES
+══════════════════════════════════════════════════════════════════════ */
+.pill {
+  display:inline-flex; align-items:center; gap:5px;
+  padding:4px 10px; border-radius:999px;
+  font-size:11px; font-weight:600;
+}
+.pill .dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+.pill-green  { background:rgba(16,185,129,.15); color:var(--green); }
+.pill-green .dot  { background:var(--green); }
+.pill-blue   { background:rgba(79,114,251,.15); color:var(--accent2); }
+.pill-blue .dot   { background:var(--accent); }
+.pill-red    { background:rgba(240,71,71,.15); color:var(--red); }
+.pill-red .dot    { background:var(--red); }
+.pill-yellow { background:rgba(245,166,35,.15); color:var(--yellow); }
+.pill-yellow .dot { background:var(--yellow); animation:blink 1.2s ease infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+.badge {
+  display:inline-block; padding:2px 9px; border-radius:999px;
+  font-size:11px; font-weight:700;
+}
+.badge-blue   { background:rgba(79,114,251,.2); color:var(--accent2); }
+.badge-green  { background:rgba(16,185,129,.15); color:var(--green); }
+.badge-red    { background:rgba(240,71,71,.15); color:var(--red); }
+.badge-yellow { background:rgba(245,166,35,.15); color:var(--yellow); }
+.badge-gray   { background:var(--bg4); color:var(--text2); }
+
+/* ════════════════════════════════════════════════════════════════════
+   FORMS
+══════════════════════════════════════════════════════════════════════ */
+.form-row { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-bottom:14px; }
+.form-group { display:flex; flex-direction:column; gap:5px; }
+.form-group label { font-size:11px; font-weight:600; color:var(--muted);
+                    text-transform:uppercase; letter-spacing:.04em; }
+.form-group input, .form-group select, .form-group textarea {
+  background:var(--bg3); border:1px solid var(--border);
+  border-radius:8px; padding:9px 13px;
+  color:var(--text); font-size:13px; outline:none;
+  transition:border-color .15s;
+}
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+  border-color:var(--accent);
+  box-shadow:0 0 0 3px rgba(79,114,251,.12);
+}
+.form-group input::placeholder { color:var(--muted); }
+.form-group select option { background:var(--bg3); }
+
+/* ════════════════════════════════════════════════════════════════════
+   TERMINAL
+══════════════════════════════════════════════════════════════════════ */
+.terminal {
+  background:#090c18; border:1px solid var(--border);
+  border-radius:10px; padding:14px 16px;
+  font-family:'Fira Mono','Consolas',monospace;
+  font-size:12px; line-height:1.7;
+  color:#8fa3c4; height:320px;
+  overflow-y:auto; white-space:pre-wrap; word-break:break-all;
+}
+.terminal-bar {
+  background:var(--bg3); border:1px solid var(--border);
+  border-bottom:none; border-radius:10px 10px 0 0;
+  padding:8px 14px; display:flex; align-items:center; gap:6px;
+}
+.terminal-bar .dot-r { width:11px;height:11px;border-radius:50%;background:#f04747; }
+.terminal-bar .dot-y { width:11px;height:11px;border-radius:50%;background:#f5a623; }
+.terminal-bar .dot-g { width:11px;height:11px;border-radius:50%;background:#10b981; }
+.terminal-bar .term-title { font-size:11px; color:var(--muted); margin-left:4px; }
+.terminal.has-bar { border-radius:0 0 10px 10px; }
+.t-ok   { color:#10b981; }
+.t-err  { color:#f04747; }
+.t-info { color:#7b96fd; }
+.t-warn { color:#f5a623; }
+.t-dim  { color:#4a5578; }
+
+/* ════════════════════════════════════════════════════════════════════
+   TABLE
+══════════════════════════════════════════════════════════════════════ */
+.tbl-wrap { overflow-x:auto; border-radius:10px; border:1px solid var(--border); }
+table { width:100%; border-collapse:collapse; font-size:12.5px; }
+thead th {
+  background:var(--bg3); padding:9px 14px;
+  text-align:left; font-size:10.5px; font-weight:700;
+  color:var(--muted); text-transform:uppercase; letter-spacing:.05em;
+  white-space:nowrap; border-bottom:1px solid var(--border);
+  position:sticky; top:0;
+}
+tbody tr { border-bottom:1px solid var(--border); transition:var(--trans); }
+tbody tr:last-child { border-bottom:none; }
+tbody tr:hover { background:var(--bg3); }
+tbody td { padding:8px 14px; color:var(--text); }
+tbody td:first-child { color:var(--muted); font-size:12px; }
+
+/* ════════════════════════════════════════════════════════════════════
+   ALERTS / CALLOUTS
+══════════════════════════════════════════════════════════════════════ */
+.alert {
+  padding:12px 16px; border-radius:9px;
+  font-size:13px; margin-bottom:14px; line-height:1.55;
+}
+.alert-info  { background:rgba(79,114,251,.1); border:1px solid rgba(79,114,251,.3); color:var(--accent2); }
+.alert-warn  { background:rgba(245,166,35,.1); border:1px solid rgba(245,166,35,.3); color:var(--yellow); }
+.alert-ok    { background:rgba(16,185,129,.1); border:1px solid rgba(16,185,129,.3); color:var(--green); }
+.alert-danger{ background:rgba(240,71,71,.1);  border:1px solid rgba(240,71,71,.3);  color:var(--red); }
+.alert strong { font-weight:700; }
+
+/* ── Step list (Data Management) ─────────────────────────────────── */
+.step-list { list-style:none; padding:0; }
+.step-list li {
+  display:flex; align-items:flex-start; gap:14px;
+  padding:12px 0; border-bottom:1px solid var(--border);
+}
+.step-list li:last-child { border-bottom:none; }
+.step-num {
+  width:28px; height:28px; border-radius:50%; flex-shrink:0;
+  background:rgba(79,114,251,.18); color:var(--accent2);
+  display:flex; align-items:center; justify-content:center;
+  font-size:12px; font-weight:700;
+}
+.step-body strong { font-weight:600; color:var(--text); display:block; margin-bottom:2px; }
+.step-body span   { font-size:12px; color:var(--text2); }
+
+/* ── Rule cards (Data Management) ────────────────────────────────── */
+.rule-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.rule-card {
+  padding:14px 16px; border-radius:10px; border:1px solid;
+  display:flex; gap:10px; align-items:flex-start;
+}
+.rule-card.ok  { background:rgba(16,185,129,.06); border-color:rgba(16,185,129,.25); }
+.rule-card.no  { background:rgba(240,71,71,.06);  border-color:rgba(240,71,71,.25); }
+.rule-card .ri { font-size:18px; flex-shrink:0; }
+.rule-card strong { font-size:12.5px; font-weight:600; display:block; margin-bottom:2px; }
+.rule-card span   { font-size:11.5px; color:var(--text2); }
+
+/* ── Tabs ────────────────────────────────────────────────────────── */
+.tab-bar {
+  display:flex; gap:2px; background:var(--bg3);
+  border:1px solid var(--border); border-radius:9px;
+  padding:3px; margin-bottom:16px; width:fit-content;
+}
+.tab-btn {
+  padding:7px 16px; border-radius:7px; border:none;
+  cursor:pointer; font-size:12.5px; font-weight:600;
+  color:var(--muted); background:transparent;
+  transition:var(--trans);
+}
+.tab-btn.active { background:var(--accent); color:#fff; }
+.tab-btn:hover:not(.active) { color:var(--text); }
+
+/* ── Download bar ────────────────────────────────────────────────── */
+.dl-bar {
+  display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  padding:10px 14px; background:var(--bg3);
+  border:1px solid var(--border); border-radius:9px; margin-bottom:14px;
+}
+.dl-bar span { font-size:12px; color:var(--muted); margin-right:4px; }
+
+/* ── Charts ─────────────────────────────────────────────────────── */
+.chart-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
+.chart-card {
+  background:var(--bg3); border:1px solid var(--border);
+  border-radius:var(--radius); padding:18px;
+}
+.chart-card h4 { font-size:11px; font-weight:700; color:var(--muted);
+                 text-transform:uppercase; letter-spacing:.06em; margin-bottom:14px; }
+canvas { max-height:200px; }
+
+/* ── Countdown widget ────────────────────────────────────────────── */
+.countdown-widget {
+  background: linear-gradient(135deg, rgba(79,114,251,.12), rgba(79,114,251,.05));
+  border:1px solid rgba(79,114,251,.25); border-radius:10px;
+  padding:14px 18px; display:flex; align-items:center; gap:16px;
+}
+.cd-icon { font-size:24px; }
+.cd-label { font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.05em; }
+.cd-time  { font-size:22px; font-weight:800; color:var(--accent2); font-variant-numeric:tabular-nums; letter-spacing:.04em; }
+
+/* ── Status row (pipeline) ───────────────────────────────────────── */
+.status-row {
+  display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px;
+}
+.status-block {
+  flex:1; min-width:140px;
+  background:var(--bg3); border:1px solid var(--border);
+  border-radius:10px; padding:14px 16px;
+  display:flex; align-items:center; gap:12px;
+}
+.status-block .sb-icon { font-size:22px; }
+.status-block .sb-info strong { font-size:13px; font-weight:700; display:block; }
+.status-block .sb-info span   { font-size:11px; color:var(--muted); }
+
+/* ── Recipient chips ─────────────────────────────────────────────── */
+.chip-list { display:flex; flex-wrap:wrap; gap:8px; min-height:30px; }
+.chip {
+  display:inline-flex; align-items:center; gap:6px;
+  background:var(--bg4); border:1px solid var(--border);
+  border-radius:999px; padding:5px 12px; font-size:12px;
+}
+.chip b { color:var(--text); font-weight:600; }
+.chip em { color:var(--text2); font-style:normal; }
+.chip-del {
+  cursor:pointer; color:var(--muted); font-size:15px;
+  line-height:1; margin-left:2px; transition:var(--trans);
+}
+.chip-del:hover { color:var(--red); }
+
+/* ── Two-col layout ─────────────────────────────────────────────── */
+.two-col { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+
+/* ── Loading ─────────────────────────────────────────────────────── */
+.spinner {
+  width:18px; height:18px; border-radius:50%;
+  border:2px solid var(--border); border-top-color:var(--accent);
+  animation:spin .65s linear infinite; display:inline-block; vertical-align:middle;
+}
+@keyframes spin { to { transform:rotate(360deg); } }
+.loading-row { display:flex; align-items:center; gap:10px; color:var(--muted); padding:20px 0; }
+
+/* ── Toast ───────────────────────────────────────────────────────── */
+#toast-box {
+  position:fixed; bottom:22px; right:22px; z-index:9999;
+  display:flex; flex-direction:column; gap:8px;
+}
+.toast {
+  background:var(--bg2); border:1px solid var(--border);
+  border-radius:10px; padding:11px 16px;
+  display:flex; align-items:center; gap:10px;
+  font-size:13px; min-width:250px; max-width:360px;
+  box-shadow:var(--shadow); animation:toastIn .2s ease;
+}
+.toast.success { border-left:3px solid var(--green); }
+.toast.error   { border-left:3px solid var(--red); }
+.toast.info    { border-left:3px solid var(--accent); }
+@keyframes toastIn { from{transform:translateX(30px);opacity:0} to{transform:none;opacity:1} }
+
+/* ── Divider ─────────────────────────────────────────────────────── */
+hr { border:none; border-top:1px solid var(--border); margin:16px 0; }
+
+/* ── Quick stat row ─────────────────────────────────────────────── */
+.kpi-row { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+.kpi {
+  background:var(--bg3); border:1px solid var(--border);
+  border-radius:9px; padding:10px 16px; min-width:120px; flex:1;
+}
+.kpi-label { font-size:10.5px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.05em; }
+.kpi-val   { font-size:20px; font-weight:800; margin-top:2px; }
+
+@media(max-width:768px){
+  .sidebar{display:none;} .main{margin-left:0;}
+  .two-col,.rule-grid,.chart-row{grid-template-columns:1fr;}
+}
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════════════
+     SIDEBAR
+══════════════════════════════════════════════════════════════════ -->
+<aside class="sidebar">
+  <div class="sb-logo">
+    <div class="sb-logo-icon">📊</div>
+    <h1>Collegedunia<br>Ranking Pipeline</h1>
+    <p>Smart SERP Tracker</p>
+  </div>
+
+  <nav class="sb-nav">
+    <div class="nav-group">
+      <div class="nav-group-label">Overview</div>
+      <div class="nav-item active" data-page="dashboard"><span class="ni">🏠</span>Dashboard</div>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Pipeline</div>
+      <div class="nav-item" data-page="pipeline"><span class="ni">⚡</span>Run Pipeline</div>
+      <div class="nav-item" data-page="quickrun"><span class="ni">🚀</span>Quick Run</div>
+      <div class="nav-item" data-page="logs"><span class="ni">📋</span>Live Logs</div>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Data</div>
+      <div class="nav-item" data-page="data-mgmt"><span class="ni">📁</span>Data Management</div>
+      <div class="nav-item" data-page="rankings"><span class="ni">🏆</span>Rankings</div>
+      <div class="nav-item" data-page="comparison"><span class="ni">🔄</span>Comparison</div>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Reports</div>
+      <div class="nav-item" data-page="reports"><span class="ni">📈</span>Reports</div>
+      <div class="nav-item" data-page="email"><span class="ni">✉️</span>Email & Distribution</div>
+    </div>
+  </nav>
+
+  <div class="sb-footer">
+    <div id="sb-lock-status">
+      <span class="spinner" style="width:10px;height:10px;"></span> Checking…
+    </div>
+  </div>
+</aside>
+
+<!-- ══════════════════════════════════════════════════════════════
+     TOPBAR
+══════════════════════════════════════════════════════════════════ -->
+<main class="main">
+<div class="topbar">
+  <div class="topbar-left">
+    <h2 id="topbar-title">Dashboard</h2>
+    <p id="topbar-meta">Refreshing…</p>
+  </div>
+  <div class="topbar-right">
+    <span id="topbar-pill" class="pill pill-green" style="display:none">
+      <span class="dot"></span><span id="topbar-pill-txt">Idle</span>
+    </span>
+    <button class="btn btn-ghost btn-sm" onclick="refreshStatus()">↻ Refresh</button>
+    <button class="btn btn-warn btn-sm" id="clear-lock-btn" onclick="clearLock()" style="display:none">
+      🔓 Clear Lock
+    </button>
+  </div>
+</div>
+
+<div class="content">
+
+<!-- ════════════════════════════════════════════════════════════
+     PAGE: DASHBOARD
+════════════════════════════════════════════════════════════════ -->
+<div class="page active" id="page-dashboard">
+  <div class="sec-head">
+    <div class="sec-head-left"><h2>Dashboard</h2><p>Pipeline health at a glance</p></div>
+    <div class="sec-head-right">
+      <button class="btn btn-ghost btn-sm" onclick="refreshStatus()">↻ Refresh</button>
+    </div>
+  </div>
+
+  <!-- Stat cards -->
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="stat-label">Run Number</div>
+      <div class="stat-value" id="d-run" style="color:var(--accent2)">—</div>
+      <div class="stat-sub">Current pipeline run</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Last Run Date</div>
+      <div class="stat-value" style="font-size:16px" id="d-lastrun">—</div>
+      <div class="stat-sub">phase1_last_run</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Pipeline Status</div>
+      <div class="stat-value" style="font-size:15px" id="d-pipe-status">—</div>
+      <div class="stat-sub" id="d-pipe-sub">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Quick Run</div>
+      <div class="stat-value" style="font-size:15px" id="d-qr-status">—</div>
+      <div class="stat-sub" id="d-qr-sub">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Lock Status</div>
+      <div class="stat-value" style="font-size:15px" id="d-lock">—</div>
+      <div class="stat-sub" id="d-lock-sub">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Next Batch Due</div>
+      <div class="stat-value" style="font-size:15px" id="d-next-batch">—</div>
+      <div class="stat-sub" id="d-next-batch-sub">—</div>
+    </div>
+  </div>
+
+  <!-- Countdown + sheet link -->
+  <div class="two-col" style="margin-bottom:16px;">
+    <div class="countdown-widget">
+      <div class="cd-icon">⏱️</div>
+      <div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+          <span style="background:var(--accent);color:#fff;font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;letter-spacing:.05em;text-transform:uppercase;">Full Pipeline</span>
+          <div class="cd-label" style="margin:0;">Next Auto-Run</div>
+        </div>
+        <div class="cd-time" id="countdown">--:--:--</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:3px;">Triggers automatically at midnight</div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:0;display:flex;align-items:center;gap:14px;">
+      <div style="font-size:28px;">📄</div>
+      <div>
+        <div class="card-title" style="margin-bottom:4px;">Google Spreadsheet</div>
+        <div id="sheet-link" style="font-size:13px;color:var(--muted);">Loading…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quick actions -->
+  <div class="card">
+    <div class="card-title">Quick Actions</div>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;">
+      <button class="btn btn-primary" onclick="navigateTo('pipeline')">⚡ Run Full Pipeline</button>
+      <button class="btn btn-success" onclick="navigateTo('quickrun')">🚀 Quick Run</button>
+      <button class="btn btn-ghost"   onclick="navigateTo('data-mgmt')">📁 Data Management</button>
+      <button class="btn btn-ghost"   onclick="navigateTo('rankings')">🏆 View Rankings</button>
+      <button class="btn btn-ghost"   onclick="navigateTo('reports')">📈 Reports</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     PAGE: RUN PIPELINE
+════════════════════════════════════════════════════════════════ -->
+<div class="page" id="page-pipeline">
+  <div class="sec-head">
+    <div class="sec-head-left"><h2>Run Pipeline</h2><p>Full automatic pipeline: Source → Intermediate → Rankings → Content</p></div>
+  </div>
+
+  <!-- Status blocks -->
+  <div class="status-row" id="pipe-status-row">
+    <div class="status-block">
+      <div class="sb-icon">⚡</div>
+      <div class="sb-info">
+        <strong id="psb-stage">Ready</strong>
+        <span id="psb-detail">Click Start to begin</span>
+      </div>
+    </div>
+    <div class="status-block">
+      <div class="sb-icon">⏱️</div>
+      <div class="sb-info">
+        <strong id="psb-elapsed">—</strong>
+        <span>Elapsed time</span>
+      </div>
+    </div>
+    <div class="status-block">
+      <div class="sb-icon">📅</div>
+      <div class="sb-info">
+        <strong id="psb-lastrun">—</strong>
+        <span>Last run date</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Controls</div>
+    <div class="alert alert-info" style="margin-bottom:14px;">
+      Runs all 3 stages: Phase 1 (Source → Intermediate) → Apps Script (Rankings) → Phase 2 (Content).<br/>
+      Equivalent to <code style="background:var(--bg4);padding:1px 6px;border-radius:4px;">python3 run_pipeline.py</code>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <button class="btn btn-primary" id="btn-pipeline" onclick="runPipeline()">⚡ Start Full Pipeline</button>
+      <span id="pipe-lbl" style="font-size:12px;color:var(--muted);"></span>
+    </div>
+  </div>
+
+  <div>
+    <div class="terminal-bar">
+      <div class="dot-r"></div><div class="dot-y"></div><div class="dot-g"></div>
+      <span class="term-title">Pipeline Output</span>
+    </div>
+    <div class="terminal has-bar" id="term-pipeline">
+      <span class="t-info">Ready. Press "Start Full Pipeline" above.</span>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     PAGE: QUICK RUN
+════════════════════════════════════════════════════════════════ -->
+<div class="page" id="page-quickrun">
+  <div class="sec-head">
+    <div class="sec-head-left"><h2>Quick Run</h2><p>On-demand ranking for a specific batch or college</p></div>
+  </div>
+
+  <div class="two-col" style="margin-bottom:16px;">
+    <div class="card" style="margin-bottom:0;">
+      <div class="card-title">Batch Mode</div>
+      <p style="font-size:12.5px;color:var(--text2);margin-bottom:12px;">
+        Rank all colleges in a specific group. Groups are formed by sorting Source by <strong>Add</strong> column (descending), then splitting into groups of 50.
+      </p>
+      <div class="alert alert-info" style="padding:9px 12px;">
+        <strong>Example:</strong> Batch 1 = first 50 colleges, Batch 2 = next 50, etc.
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:0;">
+      <div class="card-title">College Mode</div>
+      <p style="font-size:12.5px;color:var(--text2);margin-bottom:12px;">
+        Rank one specific college by its <strong>College ID</strong>. The first course for that college is picked automatically — consistent with the main pipeline.
+      </p>
+      <div class="alert alert-info" style="padding:9px 12px;">
+        <strong>Example:</strong> College ID = 12345 (from Source sheet column A)
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Run Configuration</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Mode</label>
+        <select id="qr-mode" onchange="qrModeChange()" style="min-width:160px;">
+          <option value="batch">Batch (group of 50)</option>
+          <option value="college">College (by ID)</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:1;min-width:180px;">
+        <label id="qr-val-lbl">Batch Number</label>
+        <input type="text" id="qr-val" placeholder="e.g. 1"/>
+      </div>
+      <div class="form-group">
+        <label>&nbsp;</label>
+        <button class="btn btn-success" id="btn-qr" onclick="runQuickRun()">🚀 Run Now</button>
+      </div>
+    </div>
+
+    <!-- QR Status -->
+    <div id="qr-status-bar" style="display:none;">
+      <hr/>
+      <div class="status-row" style="margin-bottom:0;">
+        <div class="status-block">
+          <div class="sb-icon">🚀</div>
+          <div class="sb-info">
+            <strong id="qr-sb-stage">Running</strong>
+            <span id="qr-sb-detail">Quick Run in progress…</span>
+          </div>
+        </div>
+        <div class="status-block">
+          <div class="sb-icon">⏱️</div>
+          <div class="sb-info">
+            <strong id="qr-elapsed">—</strong>
+            <span>Elapsed time</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="terminal-bar">
+      <div class="dot-r"></div><div class="dot-y"></div><div class="dot-g"></div>
+      <span class="term-title">Quick Run Output</span>
+    </div>
+    <div class="terminal has-bar" id="term-qr">
+      <span class="t-info">Ready. Select mode and value, then click Run Now.</span>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     PAGE: DATA MANAGEMENT
+════════════════════════════════════════════════════════════════ -->
+<div class="page" id="page-data-mgmt">
+  <div class="sec-head">
+    <div class="sec-head-left"><h2>Data Management</h2><p>How to add, manage, and remove college data</p></div>
+    <div class="sec-head-right">
+      <div id="dm-sheet-btn"><button class="btn btn-primary btn-sm" disabled>📄 Open Spreadsheet →</button></div>
+    </div>
+  </div>
+
+  <!-- Rules -->
+  <div class="card">
+    <div class="card-title">⚠️ Important Rules — Read Before Modifying Data</div>
+    <div class="rule-grid">
+      <div class="rule-card no">
+        <div class="ri">🚫</div>
+        <div><strong>Do NOT delete the Checkpoint column</strong>
+          <span>The pipeline uses this to track the 15-day ranking cycle. Deleting it resets all tracking.</span></div>
+      </div>
+      <div class="rule-card no">
+        <div class="ri">🚫</div>
+        <div><strong>Do NOT modify the Intermediate sheet manually</strong>
+          <span>This sheet is managed entirely by the pipeline. Any manual changes will be overwritten.</span></div>
+      </div>
+      <div class="rule-card no">
+        <div class="ri">🚫</div>
+        <div><strong>Do NOT change Source sheet column order</strong>
+          <span>Columns are read by position. Moving or renaming columns breaks data ingestion.</span></div>
+      </div>
+      <div class="rule-card no">
+        <div class="ri">🚫</div>
+        <div><strong>Do NOT delete the Final or Content tabs</strong>
+          <span>These hold your historical ranking data. Deleting them loses all previous run data.</span></div>
+      </div>
+      <div class="rule-card ok">
+        <div class="ri">✅</div>
+        <div><strong>You CAN add new rows to the Source sheet</strong>
+          <span>New colleges are automatically detected and queued for ranking on the next pipeline run.</span></div>
+      </div>
+      <div class="rule-card ok">
+        <div class="ri">✅</div>
+        <div><strong>You CAN edit college_name and course_name</strong>
+          <span>Display names in Source can be updated at any time — the pipeline uses college_id for tracking.</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- How to add colleges -->
+  <div class="card">
+    <div class="card-title">📥 How to Add New Colleges to Source Sheet</div>
+    <ul class="step-list">
+      <li>
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <strong>Open the Google Spreadsheet</strong>
+          <span>Click the link in the header above, or go to your <span id="step-sheet-link" style="color:var(--accent2);">spreadsheet</span>.</span>
+        </div>
+      </li>
+      <li>
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <strong>Go to the "Source" tab</strong>
+          <span>Click the "Source" sheet tab at the bottom of the spreadsheet.</span>
+        </div>
+      </li>
+      <li>
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <strong>Add a new row with the required columns</strong>
+          <span>Fill in: <code style="background:var(--bg4);padding:1px 5px;border-radius:4px;">college_id</code>, <code style="background:var(--bg4);padding:1px 5px;border-radius:4px;">course_id</code>, <code style="background:var(--bg4);padding:1px 5px;border-radius:4px;">college_name</code>, <code style="background:var(--bg4);padding:1px 5px;border-radius:4px;">course_name</code>, <code style="background:var(--bg4);padding:1px 5px;border-radius:4px;">keyword</code>, <code style="background:var(--bg4);padding:1px 5px;border-radius:4px;">Add</code> (the date/priority field for selection ordering).</span>
+        </div>
+      </li>
+      <li>
+        <div class="step-num">4</div>
+        <div class="step-body">
+          <strong>Wait for the next auto-run (midnight) or trigger manually</strong>
+          <span>New colleges are auto-detected. Run the pipeline manually from the "Run Pipeline" page if you don't want to wait.</span>
+        </div>
+      </li>
+      <li>
+        <div class="step-num">5</div>
+        <div class="step-body">
+          <strong>Verify in Rankings</strong>
+          <span>After the pipeline runs, check the "Rankings" page to confirm your new colleges appear in the Final sheet.</span>
+        </div>
+      </li>
+    </ul>
+  </div>
+
+  <!-- How to remove colleges -->
+  <div class="card">
+    <div class="card-title">🗑️ How to Remove a College</div>
+    <div class="alert alert-warn" style="margin-bottom:14px;">
+      Removing a college from Source will stop it from being ranked in future runs. However, existing data in Intermediate and Final sheets is NOT automatically deleted.
+    </div>
+    <ul class="step-list">
+      <li>
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <strong>Delete or comment out the row in Source sheet</strong>
+          <span>Either delete the entire row, or add a prefix like <code style="background:var(--bg4);padding:1px 5px;border-radius:4px;">REMOVED_</code> to the college_id to deactivate it.</span>
+        </div>
+      </li>
+      <li>
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <strong>Optionally clean Intermediate sheet</strong>
+          <span>If you want to remove historical keyword data, you can manually delete the corresponding rows in the Intermediate sheet — but this is optional.</span>
+        </div>
+      </li>
+    </ul>
+  </div>
+
+  <!-- Source sheet format reference -->
+  <div class="card">
+    <div class="card-title">📋 Source Sheet — Expected Column Format</div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th>Column</th><th>Example Value</th><th>Description</th>
+        </tr></thead>
+        <tbody>
+          <tr><td>A — college_id</td>  <td>12345</td>           <td>Unique college identifier (never change this)</td></tr>
+          <tr><td>B — course_id</td>   <td>67890</td>           <td>Unique course identifier</td></tr>
+          <tr><td>C — college_name</td><td>IIT Delhi</td>       <td>Display name of the college</td></tr>
+          <tr><td>D — course_name</td> <td>B.Tech CSE</td>      <td>Display name of the course</td></tr>
+          <tr><td>E — keyword</td>     <td>IIT Delhi CSE rank</td><td>The Google search keyword to check rank for</td></tr>
+          <tr><td>F — Add</td>         <td>2026-01-15</td>      <td>Date added / priority field — used for group selection ordering</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     PAGE: RANKINGS
+════════════════════════════════════════════════════════════════ -->
+<div class="page" id="page-rankings" style="display:none;flex-direction:column;height:calc(100vh - 56px);overflow:hidden;">
+  <!-- Fixed header area — never scrolls -->
+  <div style="flex-shrink:0;padding:24px 28px 0;">
+    <div class="sec-head" style="margin-bottom:14px;">
+      <div class="sec-head-left"><h2>Rankings</h2><p>Live ranking data from Google Sheets</p></div>
+    </div>
+
+    <!-- Source selector tabs -->
+    <div class="tab-bar" style="margin-bottom:12px;">
+      <button class="tab-btn active" id="rk-tab-pipeline" onclick="switchRankSource('pipeline')">📊 Pipeline Rankings (Final)</button>
+      <button class="tab-btn" id="rk-tab-quickrun" onclick="switchRankSource('quickrun')">🚀 Quick Run Rankings</button>
+    </div>
+
+    <!-- Download bar -->
+    <div class="dl-bar" style="margin-bottom:12px;">
+      <span>Download:</span>
+      <button class="btn btn-ghost btn-sm" onclick="downloadCSV()">⬇ CSV</button>
+      <button class="btn btn-ghost btn-sm" onclick="downloadRankingsPDF()">⬇ PDF</button>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:10px;">
+        <span id="rk-count" style="font-size:12px;color:var(--muted);"></span>
+        <button class="btn btn-ghost btn-sm" onclick="loadRankings()">↻ Refresh</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scrollable table area — only this part scrolls -->
+  <div style="flex:1;overflow:hidden;padding:0 28px 24px;min-height:0;">
+    <div style="height:100%;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;display:flex;flex-direction:column;">
+
+      <div id="rk-loading" class="loading-row" style="padding:20px 22px;flex-shrink:0;">
+        <span class="spinner"></span> Loading rankings from Google Sheets…
+      </div>
+      <div id="rk-empty" style="display:none;padding:20px 22px;color:var(--muted);font-size:13px;flex-shrink:0;">
+        No data found. Run the pipeline first to generate rankings.
+      </div>
+
+      <!-- Table with its own scroll — page never moves -->
+      <div id="rk-wrap" style="display:none;flex:1;overflow-y:auto;overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+          <thead id="rk-head" style="position:sticky;top:0;z-index:10;"></thead>
+          <tbody id="rk-body"></tbody>
+        </table>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     PAGE: COMPARISON
+════════════════════════════════════════════════════════════════ -->
+<div class="page" id="page-comparison">
+  <div class="sec-head">
+    <div class="sec-head-left">
+      <h2>Comparison</h2>
+      <p>Upload two ranking CSVs to compare rank changes across silos</p>
+    </div>
+  </div>
+
+  <div class="alert alert-info" style="margin-bottom:16px;">
+    Download your ranking CSVs from the <strong>Rankings</strong> page (Pipeline or Quick Run),
+    then upload the <strong>older</strong> one as "Old CSV" and the <strong>newer</strong> one as "New CSV".
+    Rows are matched by <strong>College ID + Keyword</strong>.
+  </div>
+
+  <!-- File upload cards -->
+  <div class="two-col" style="margin-bottom:16px;">
+    <div class="card" style="margin-bottom:0;">
+      <div class="card-title">📂 Old CSV (Previous Rankings)</div>
+      <div class="form-group">
+        <label>Select Old Rankings CSV</label>
+        <input type="file" id="cmp-old-file" accept=".csv"
+               style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;
+                      padding:9px 13px;color:var(--text);font-size:13px;width:100%;cursor:pointer;"
+               onchange="cmpFileChosen('old', this)"/>
+      </div>
+      <div id="cmp-old-status" style="margin-top:8px;font-size:12px;color:var(--muted);min-height:18px;"></div>
+    </div>
+    <div class="card" style="margin-bottom:0;">
+      <div class="card-title">📂 New CSV (Latest Rankings)</div>
+      <div class="form-group">
+        <label>Select New Rankings CSV</label>
+        <input type="file" id="cmp-new-file" accept=".csv"
+               style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;
+                      padding:9px 13px;color:var(--text);font-size:13px;width:100%;cursor:pointer;"
+               onchange="cmpFileChosen('new', this)"/>
+      </div>
+      <div id="cmp-new-status" style="margin-top:8px;font-size:12px;color:var(--muted);min-height:18px;"></div>
+    </div>
+  </div>
+
+  <!-- Action bar -->
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+    <button class="btn btn-primary" id="btn-compare" onclick="runComparison()">🔄 Compare</button>
+    <button class="btn btn-ghost btn-sm" id="btn-cmp-csv" onclick="downloadComparisonExcel()" style="display:none;">⬇ Excel</button>
+    <button class="btn btn-ghost btn-sm" id="btn-cmp-pdf" onclick="downloadComparisonPDF()" style="display:none;">⬇ PDF</button>
+    <span id="cmp-count" style="font-size:12px;color:var(--muted);"></span>
+  </div>
+
+  <!-- Color legend (shown after compare) -->
+  <div id="cmp-legend" style="display:none;margin-bottom:14px;">
+    <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;align-items:center;">
+      <span style="font-weight:600;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;">Latest Rank:</span>
+      <span style="background:rgba(16,185,129,0.2);border:1px solid rgba(16,185,129,0.4);padding:3px 12px;border-radius:6px;color:var(--green);font-weight:600;">▲ Improved (lower #)</span>
+      <span style="background:rgba(240,71,71,0.2);border:1px solid rgba(240,71,71,0.4);padding:3px 12px;border-radius:6px;color:var(--red);font-weight:600;">▼ Dropped (higher #)</span>
+      <span style="background:rgba(245,166,35,0.2);border:1px solid rgba(245,166,35,0.4);padding:3px 12px;border-radius:6px;color:var(--yellow);font-weight:600;">— Same / N/A</span>
+    </div>
+  </div>
+
+  <div id="cmp-loading" class="loading-row" style="display:none;"><span class="spinner"></span> Comparing…</div>
+  <div id="cmp-result" style="display:none;"></div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     PAGE: REPORTS
+════════════════════════════════════════════════════════════════ -->
+<div class="page" id="page-reports">
+  <div class="sec-head">
+    <div class="sec-head-left"><h2>Reports</h2><p>Ranking performance summaries</p></div>
+    <div class="sec-head-right">
+      <button class="btn btn-ghost btn-sm" onclick="downloadReportCSV()">⬇ CSV</button>
+      <button class="btn btn-primary btn-sm" onclick="downloadReportPDF()">⬇ PDF</button>
+    </div>
+  </div>
+
+  <div class="tab-bar">
+    <button class="tab-btn active" id="rep-tab-daily"  onclick="switchReportTab('daily')">Daily Report</button>
+    <button class="tab-btn"        id="rep-tab-weekly" onclick="switchReportTab('weekly')">Weekly Report (7 days)</button>
+  </div>
+
+  <div id="rep-loading" class="loading-row"><span class="spinner"></span> Loading report…</div>
+  <div id="rep-content" style="display:none;"></div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     PAGE: EMAIL
+════════════════════════════════════════════════════════════════ -->
+<div class="page" id="page-email">
+  <div class="sec-head">
+    <div class="sec-head-left"><h2>Email Distribution</h2><p>Send ranking reports to your managers</p></div>
+  </div>
+
+  <div class="two-col">
+    <!-- Recipients -->
+    <div>
+      <div class="card">
+        <div class="card-title">👥 Recipients</div>
+        <div class="form-row">
+          <div class="form-group" style="flex:1;">
+            <label>Name</label>
+            <input type="text" id="rec-name" placeholder="Manager name"/>
+          </div>
+          <div class="form-group" style="flex:2;">
+            <label>Email Address</label>
+            <input type="email" id="rec-email" placeholder="manager@company.com"/>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="addRecipient()" style="margin-bottom:14px;">+ Add Recipient</button>
+        <div class="chip-list" id="chip-list">
+          <span style="color:var(--muted);font-size:12px;">No recipients yet.</span>
+        </div>
+      </div>
+
+      <!-- Send report -->
+      <div class="card">
+        <div class="card-title">📤 Send Report Now</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Report Period</label>
+            <select id="send-period">
+              <option value="daily">Daily Report</option>
+              <option value="weekly">Weekly Report</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Format</label>
+            <select id="send-format">
+              <option value="pdf">PDF</option>
+              <option value="csv">CSV</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>&nbsp;</label>
+            <button class="btn btn-success" onclick="sendReport()">📧 Send to All</button>
+          </div>
+        </div>
+        <p style="font-size:12px;color:var(--muted);">Report is generated in the chosen format and emailed to all recipients above.</p>
+      </div>
+    </div>
+
+    <!-- SMTP config -->
+    <div class="card">
+      <div class="card-title">⚙️ SMTP Configuration</div>
+      <div class="alert alert-warn" style="margin-bottom:14px;">
+        <strong>Gmail users — App Password required:</strong><br/>
+        Gmail does NOT accept your regular password for SMTP.<br/>
+        Go to <strong>Google Account → Security → 2-Step Verification → App Passwords</strong>,
+        create an App Password for "Mail", and paste the 16-character code here as the password.<br/>
+        Host: <code style="background:rgba(245,166,35,.15);padding:1px 5px;border-radius:4px;">smtp.gmail.com</code>
+        &nbsp;Port: <strong>587</strong>
+      </div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label>SMTP Host</label>
+        <input type="text" id="smtp-host" placeholder="smtp.gmail.com"/>
+      </div>
+      <div class="two-col" style="margin-bottom:12px;">
+        <div class="form-group">
+          <label>Port</label>
+          <input type="number" id="smtp-port" placeholder="587" value="587"/>
+        </div>
+        <div class="form-group">
+          <label>Encryption</label>
+          <select id="smtp-tls">
+            <option value="starttls">STARTTLS (port 587)</option>
+            <option value="ssl">SSL (port 465)</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label>Username / Email</label>
+        <input type="text" id="smtp-user" placeholder="you@gmail.com"/>
+      </div>
+      <div class="form-group" style="margin-bottom:12px;">
+        <label>Password / App Password</label>
+        <div style="position:relative;">
+          <input type="password" id="smtp-password" placeholder="Enter App Password"
+                 data-masked="0"
+                 onfocus="smtpPwFocus(this)"
+                 style="width:100%;padding-right:90px;"/>
+          <span id="smtp-pw-badge" style="display:none;position:absolute;right:10px;top:50%;transform:translateY(-50%);background:rgba(16,185,129,.15);color:var(--green);font-size:10px;font-weight:700;padding:3px 8px;border-radius:5px;pointer-events:none;">SAVED ✓</span>
+        </div>
+        <div id="smtp-pw-hint" style="display:none;font-size:11px;color:var(--muted);margin-top:4px;">
+          Click the field to enter a new password. Leave unchanged to keep the saved one.
+        </div>
+      </div>
+      <div class="form-group" style="margin-bottom:14px;">
+        <label>From Address (optional)</label>
+        <input type="text" id="smtp-from" placeholder="Ranking Pipeline &lt;you@gmail.com&gt;"/>
+      </div>
+      <button class="btn btn-primary" onclick="saveSmtp()">💾 Save SMTP Settings</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     PAGE: LIVE LOGS
+════════════════════════════════════════════════════════════════ -->
+<div class="page" id="page-logs">
+  <div class="sec-head">
+    <div class="sec-head-left"><h2>Live Logs</h2><p>Recent entries from pipeline_ui.log</p></div>
+    <div class="sec-head-right">
+      <button class="btn btn-ghost btn-sm" onclick="loadLogs()">↻ Refresh</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('term-logs').innerHTML=''">Clear</button>
+    </div>
+  </div>
+  <div class="terminal-bar">
+    <div class="dot-r"></div><div class="dot-y"></div><div class="dot-g"></div>
+    <span class="term-title">pipeline_ui.log — last 200 lines</span>
+  </div>
+  <div class="terminal has-bar" id="term-logs" style="height:520px;">
+    <span class="t-info">Click Refresh to load logs.</span>
+  </div>
+</div>
+
+</div><!-- /.content -->
+</main>
+
+<div id="toast-box"></div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     JAVASCRIPT
+══════════════════════════════════════════════════════════════════ -->
+<script>
+// ── State ────────────────────────────────────────────────────────
+var _currentStatus    = {};
+var _rankSource       = "pipeline";
+var _reportPeriod     = "daily";
+var _pipelineStart    = null;
+var _qrStart          = null;
+var _elapsedInterval  = null;
+var _charts           = [];
+
+// ── Navigation ───────────────────────────────────────────────────
+var pageNames = {
+  dashboard:"Dashboard", pipeline:"Run Pipeline",
+  quickrun:"Quick Run", logs:"Live Logs",
+  "data-mgmt":"Data Management", rankings:"Rankings",
+  comparison:"Comparison",
+  reports:"Reports", email:"Email & Distribution",
+};
+
+function navigateTo(page) {
+  document.querySelectorAll('.page').forEach(p => {
+    p.classList.remove('active');
+    p.style.display = 'none';
+  });
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  var pageEl = document.getElementById('page-' + page);
+  pageEl.classList.add('active');
+  // Rankings uses flex layout so it can fill height without page scroll
+  pageEl.style.display = (page === 'rankings') ? 'flex' : 'block';
+  // Remove content padding only for rankings (full-height table layout)
+  document.querySelector('.content').classList.toggle('rankings-active', page === 'rankings');
+  document.querySelector('.nav-item[data-page="' + page + '"]').classList.add('active');
+  document.getElementById('topbar-title').textContent = pageNames[page] || page;
+  if (page === 'rankings')  loadRankings();
+  if (page === 'reports')   loadReport(_reportPeriod);
+  if (page === 'email')     { loadRecipients(); loadSmtpConfig(); }
+  if (page === 'logs')      loadLogs();
+  if (page === 'data-mgmt') injectSheetLinks();
+}
+document.querySelectorAll('.nav-item').forEach(el => {
+  el.addEventListener('click', () => navigateTo(el.dataset.page));
+});
+
+// ── Toast ─────────────────────────────────────────────────────────
+function toast(msg, type) {
+  var box = document.getElementById('toast-box');
+  var el  = document.createElement('div');
+  el.className = 'toast ' + (type || 'info');
+  el.innerHTML = (type==='success'?'✅':type==='error'?'❌':'ℹ️') +
+                 ' <span>' + esc(msg) + '</span>';
+  box.appendChild(el);
+  setTimeout(() => el.remove(), 4500);
+}
+
+// ── Countdown ─────────────────────────────────────────────────────
+function updateCountdown() {
+  var now  = new Date();
+  var mid  = new Date(now); mid.setHours(24,0,0,0);
+  var diff = mid - now;
+  var h = String(Math.floor(diff/3600000)).padStart(2,'0');
+  var m = String(Math.floor(diff%3600000/60000)).padStart(2,'0');
+  var s = String(Math.floor(diff%60000/1000)).padStart(2,'0');
+  document.getElementById('countdown').textContent = h + ':' + m + ':' + s;
+}
+setInterval(updateCountdown, 1000);
+updateCountdown();
+
+// ── Status ────────────────────────────────────────────────────────
+function refreshStatus() {
+  fetch('/api/status').then(r => r.json()).then(function(d) {
+    _currentStatus = d;
+
+    // Stat cards
+    set('d-run', d.run_number || '—');
+    set('d-lastrun', d.phase1_last_run || 'Never');
+
+    // Pipeline status
+    if (d.pipeline_running) {
+      setC('d-pipe-status', '▶ Running', 'var(--yellow)');
+      set('d-pipe-sub', 'Full pipeline active');
+    } else {
+      setC('d-pipe-status', '● Idle', 'var(--green)');
+      set('d-pipe-sub', 'Waiting for next run');
+    }
+
+    // Quick Run status
+    if (d.quickrun_running) {
+      setC('d-qr-status', '🚀 Running', 'var(--accent2)');
+      set('d-qr-sub', 'Quick run active');
+    } else {
+      setC('d-qr-status', '● Idle', 'var(--green)');
+      set('d-qr-sub', 'No active quick run');
+    }
+
+    // Lock
+    var clrBtn = document.getElementById('clear-lock-btn');
+    if (d.pipeline_locked) {
+      setC('d-lock', '🔒 Locked', 'var(--red)');
+      set('d-lock-sub', 'Since ' + (d.lock_since||'').slice(0,16));
+      clrBtn.style.display = '';
+      document.getElementById('sb-lock-status').innerHTML =
+        '<span style="color:var(--red);">🔒 Pipeline locked</span>';
+    } else {
+      setC('d-lock', '🔓 Free', 'var(--green)');
+      set('d-lock-sub', 'No active lock');
+      clrBtn.style.display = 'none';
+      document.getElementById('sb-lock-status').innerHTML =
+        '<span style="color:var(--green);">✓ Pipeline free</span>';
+    }
+
+    // Top pill
+    var pill = document.getElementById('topbar-pill');
+    var ptxt = document.getElementById('topbar-pill-txt');
+    pill.style.display = '';
+    if (d.pipeline_running) {
+      pill.className = 'pill pill-yellow'; ptxt.textContent = 'Pipeline Running';
+    } else if (d.quickrun_running) {
+      pill.className = 'pill pill-blue'; ptxt.textContent = 'Quick Run Active';
+    } else {
+      pill.className = 'pill pill-green'; ptxt.textContent = 'Idle';
+    }
+
+    // Pipeline page info
+    set('psb-lastrun', d.phase1_last_run || 'Never');
+    if (!d.pipeline_running) {
+      set('psb-stage', 'Ready'); set('psb-detail', 'Click Start to begin');
+    }
+
+    // Next batch due
+    if (d.next_batch_date) {
+      var days = d.next_batch_days;
+      if (days <= 0) {
+        setC('d-next-batch', 'Due Today', 'var(--yellow)');
+        set('d-next-batch-sub', d.next_batch_date + ' — batch ready');
+      } else if (days === 1) {
+        setC('d-next-batch', 'Tomorrow', 'var(--accent2)');
+        set('d-next-batch-sub', d.next_batch_date + ' at 12:00 AM');
+      } else {
+        setC('d-next-batch', 'In ' + days + ' days', 'var(--green)');
+        set('d-next-batch-sub', d.next_batch_date + ' at 12:00 AM');
+      }
+    } else {
+      setC('d-next-batch', 'No data yet', 'var(--muted)');
+      set('d-next-batch-sub', 'Run pipeline first');
+    }
+
+    // Spreadsheet link
+    if (d.spreadsheet_id) {
+      var url  = 'https://docs.google.com/spreadsheets/d/' + d.spreadsheet_id;
+      var link = '<a href="'+url+'" target="_blank" style="color:var(--accent2);text-decoration:none;font-weight:600;">📄 Open Spreadsheet →</a>';
+      var btn = '<a href="'+url+'" target="_blank" class="btn btn-primary btn-sm" style="text-decoration:none;">📄 Open Spreadsheet →</a>';
+      document.getElementById('sheet-link').innerHTML = btn;
+      document.getElementById('dm-sheet-btn').innerHTML = btn;
+    }
+
+    document.getElementById('topbar-meta').textContent =
+      'Last refreshed: ' + new Date().toLocaleTimeString();
+  }).catch(() => {
+    document.getElementById('topbar-meta').textContent = 'Could not reach server';
+  });
+}
+
+function injectSheetLinks() {
+  var sid = _currentStatus.spreadsheet_id || '';
+  if (!sid) return;
+  var url  = 'https://docs.google.com/spreadsheets/d/' + sid;
+  var link = '<a href="'+url+'" target="_blank" class="btn btn-primary btn-sm" style="text-decoration:none;display:inline-flex;margin-top:6px;">📄 Open Spreadsheet →</a>';
+  var el = document.getElementById('step-sheet-link');
+  if (el) el.outerHTML = link;
+}
+
+// ── Terminal helpers ──────────────────────────────────────────────
+function appendTerm(id, text, cls) {
+  var el = document.getElementById(id);
+  var sp = document.createElement('span');
+  if (cls) sp.className = cls;
+  sp.textContent = text + '\n';
+  el.appendChild(sp);
+  el.scrollTop = el.scrollHeight;
+}
+function clearTerm(id) { document.getElementById(id).innerHTML = ''; }
+function lineClass(l) {
+  if (/✓|complete|success|done/i.test(l))   return 't-ok';
+  if (/✗|error|fail|abort/i.test(l))        return 't-err';
+  if (/⚠|warning|caution/i.test(l))         return 't-warn';
+  if (/▶|stage|round|starting|running/i.test(l)) return 't-info';
+  return '';
+}
+
+// ── Elapsed timer ─────────────────────────────────────────────────
+function startElapsed(elId, startMs) {
+  stopElapsed();
+  _elapsedInterval = setInterval(function() {
+    var s = Math.floor((Date.now() - startMs) / 1000);
+    var m = Math.floor(s/60); s = s%60;
+    document.getElementById(elId).textContent = m + 'm ' + s + 's';
+  }, 1000);
+}
+function stopElapsed() {
+  if (_elapsedInterval) { clearInterval(_elapsedInterval); _elapsedInterval = null; }
+}
+
+// ── Run Pipeline ──────────────────────────────────────────────────
+function runPipeline() {
+  clearTerm('term-pipeline');
+  document.getElementById('btn-pipeline').disabled = true;
+  set('psb-stage', 'Starting…'); set('psb-detail', 'Connecting to pipeline');
+  set('pipe-lbl', '');
+  _pipelineStart = Date.now();
+  startElapsed('psb-elapsed', _pipelineStart);
+
+  var es = new EventSource('/api/run-pipeline');
+
+  es.onmessage = function(e) {
+    appendTerm('term-pipeline', e.data, lineClass(e.data));
+    // Update stage label from output
+    if (/stage 1/i.test(e.data)) { set('psb-stage','Stage 1'); set('psb-detail','Populating Intermediate'); }
+    if (/stage 2/i.test(e.data)) { set('psb-stage','Stage 2'); set('psb-detail','Running Apps Script ranking'); }
+    if (/stage 3/i.test(e.data)) { set('psb-stage','Stage 3'); set('psb-detail','Building Content tab'); }
+  };
+  es.addEventListener('done', function() {
+    es.close(); stopElapsed();
+    appendTerm('term-pipeline', '\n✓ Pipeline finished!', 't-ok');
+    document.getElementById('btn-pipeline').disabled = false;
+    set('psb-stage','Completed'); set('psb-detail','All stages done');
+    toast('Pipeline completed successfully!', 'success');
+    refreshStatus();
+  });
+  es.addEventListener('error', function(e) {
+    if (e.data) appendTerm('term-pipeline', e.data, 't-err');
+    es.close(); stopElapsed();
+    document.getElementById('btn-pipeline').disabled = false;
+    set('psb-stage','Finished'); set('psb-detail','Check output above');
+    refreshStatus();
+  });
+  es.onerror = function() {
+    if (es.readyState === 2) {
+      document.getElementById('btn-pipeline').disabled = false;
+      stopElapsed(); refreshStatus();
+    }
+  };
+}
+
+// ── Quick Run ─────────────────────────────────────────────────────
+function qrModeChange() {
+  var mode = document.getElementById('qr-mode').value;
+  var lbl  = document.getElementById('qr-val-lbl');
+  var inp  = document.getElementById('qr-val');
+  if (mode === 'batch') {
+    lbl.textContent = 'Batch Number';
+    inp.placeholder = 'e.g. 1  (first 50 from Source)';
+  } else {
+    lbl.textContent = 'College ID';
+    inp.placeholder = 'e.g. 12345';
+  }
+}
+
+function runQuickRun() {
+  var mode  = document.getElementById('qr-mode').value;
+  var value = document.getElementById('qr-val').value.trim();
+  if (!value) { toast('Please enter a ' + (mode==='batch'?'batch number':'college ID'), 'error'); return; }
+
+  clearTerm('term-qr');
+  document.getElementById('btn-qr').disabled = true;
+  document.getElementById('qr-status-bar').style.display = '';
+  set('qr-sb-stage', 'Starting'); set('qr-sb-detail', 'Initialising quick run…');
+  _qrStart = Date.now();
+  startElapsed('qr-elapsed', _qrStart);
+
+  fetch('/api/quick-run', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ mode, value })
+  }).then(function(r) {
+    if (!r.ok) return r.json().then(d => { throw new Error(d.error || 'Failed'); });
+    var reader  = r.body.getReader();
+    var decoder = new TextDecoder();
+    var buf     = '';
+
+    function read() {
+      reader.read().then(function(res) {
+        if (res.done) {
+          document.getElementById('btn-qr').disabled = false;
+          stopElapsed();
+          document.getElementById('qr-status-bar').style.display = 'none';
+          toast('Quick Run finished!', 'success');
+          refreshStatus(); return;
+        }
+        buf += decoder.decode(res.value, {stream:true});
+        var parts = buf.split('\n\n'); buf = parts.pop();
+        parts.forEach(function(chunk) {
+          var evt='message', data='';
+          chunk.split('\n').forEach(l => {
+            if (l.startsWith('event: ')) evt = l.slice(7).trim();
+            if (l.startsWith('data: '))  data = l.slice(6);
+          });
+          if (evt === 'done') {
+            appendTerm('term-qr', '\n✓ Quick Run finished!', 't-ok');
+          } else if (evt === 'error') {
+            appendTerm('term-qr', data, 't-err');
+          } else if (data) {
+            appendTerm('term-qr', data, lineClass(data));
+            if (/round/i.test(data)) { set('qr-sb-stage','Ranking'); set('qr-sb-detail', data.trim().slice(0,50)); }
+          }
+        });
+        read();
+      });
+    }
+    read();
+  }).catch(function(e) {
+    document.getElementById('btn-qr').disabled = false;
+    stopElapsed();
+    document.getElementById('qr-status-bar').style.display = 'none';
+    toast(e.message, 'error');
+    appendTerm('term-qr', 'Error: ' + e.message, 't-err');
+  });
+}
+
+// ── Clear Lock ────────────────────────────────────────────────────
+function clearLock() {
+  if (!confirm('Clear pipeline lock?\nOnly do this if the pipeline is NOT actively running.')) return;
+  fetch('/api/clear-lock', {method:'POST'}).then(r=>r.json()).then(d => {
+    toast(d.message || d.error, d.error?'error':'success');
+    refreshStatus();
+  });
+}
+
+// ── Rankings ──────────────────────────────────────────────────────
+function switchRankSource(src) {
+  _rankSource = src;
+  document.getElementById('rk-tab-pipeline').className = 'tab-btn' + (src==='pipeline'?' active':'');
+  document.getElementById('rk-tab-quickrun').className = 'tab-btn' + (src==='quickrun'?' active':'');
+  loadRankings();
+}
+
+function loadRankings() {
+  document.getElementById('rk-loading').style.display = '';
+  document.getElementById('rk-empty').style.display   = 'none';
+  document.getElementById('rk-wrap').style.display    = 'none';
+  document.getElementById('rk-count').textContent     = '';
+
+  fetch('/api/data/rankings?source=' + _rankSource).then(r=>r.json()).then(function(d) {
+    document.getElementById('rk-loading').style.display = 'none';
+
+    if (!d.rows || d.rows.length === 0) {
+      document.getElementById('rk-empty').style.display = '';
+      return;
+    }
+
+    document.getElementById('rk-count').textContent = d.total + ' colleges';
+
+    var head = document.getElementById('rk-head');
+    var body = document.getElementById('rk-body');
+    head.innerHTML = ''; body.innerHTML = '';
+
+    var tr = document.createElement('tr');
+    d.headers.forEach(h => {
+      var th = document.createElement('th');
+      th.textContent = h; tr.appendChild(th);
+    });
+    head.appendChild(tr);
+
+    d.rows.forEach(function(row) {
+      var tr2 = document.createElement('tr');
+      row.forEach(function(cell, ci) {
+        var td = document.createElement('td');
+        var h  = (d.headers[ci]||'').toLowerCase();
+        if (h.includes('rank') && cell && ci > 4) {
+          var cls = 'badge-blue';
+          if (cell==='NOT_FOUND') cls='badge-red';
+          else if (cell==='ERROR'||cell==='CLEARED') cls='badge-yellow';
+          td.innerHTML = '<span class="badge '+cls+'">' + esc(cell) + '</span>';
+        } else if (h.includes('url') && cell && cell.startsWith('http')) {
+          td.innerHTML = '<a href="'+esc(cell)+'" target="_blank" style="color:var(--accent2);font-size:11px;">↗ link</a>';
+        } else {
+          td.textContent = cell;
+        }
+        tr2.appendChild(td);
+      });
+      body.appendChild(tr2);
+    });
+
+    document.getElementById('rk-wrap').style.display = '';
+  }).catch(function() {
+    document.getElementById('rk-loading').innerHTML =
+      '<span style="color:var(--red);">Error loading rankings. Check if token.json exists.</span>';
+  });
+}
+
+function downloadCSV() {
+  toast('Preparing CSV…', 'info');
+  window.location.href = '/api/download/csv?source=' + _rankSource;
+}
+function downloadRankingsPDF() {
+  toast('Generating rankings PDF… please wait.', 'info');
+  var url = '/api/download/rankings-pdf?source=' + _rankSource;
+  fetch(url)
+    .then(function(r) {
+      var ct = r.headers.get('content-type') || '';
+      if (r.ok && ct.includes('pdf')) return r.blob();
+      return r.json().then(function(d) { throw new Error(d.error || 'Server error'); });
+    })
+    .then(function(blob) {
+      var a  = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'rankings_' + _rankSource + '_' + new Date().toISOString().slice(0,10) + '.pdf';
+      document.body.appendChild(a); a.click();
+      setTimeout(function() { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+      toast('PDF downloaded!', 'success');
+    })
+    .catch(function(e) { toast('PDF Error: ' + e.message, 'error'); });
+}
+
+// ── Reports ───────────────────────────────────────────────────────
+var siloDisplay = {
+  ADMISSIONS:'Admissions', FEES:'Fees', PLACEMENTS:'Placements',
+  SCHOLARSHIPS:'Scholarships', MAIN:'Main', SINGLE_COURSE:'Single Course'
+};
+
+function switchReportTab(period) {
+  _reportPeriod = period;
+  document.getElementById('rep-tab-daily').className  = 'tab-btn' + (period==='daily'?' active':'');
+  document.getElementById('rep-tab-weekly').className = 'tab-btn' + (period==='weekly'?' active':'');
+  loadReport(period);
+}
+
+function loadReport(period) {
+  document.getElementById('rep-loading').style.display = '';
+  document.getElementById('rep-content').style.display = 'none';
+  _charts.forEach(c => c.destroy()); _charts = [];
+
+  fetch('/api/report/' + period).then(r=>r.json()).then(function(d) {
+    document.getElementById('rep-loading').style.display = 'none';
+    renderReport(d);
+    document.getElementById('rep-content').style.display = '';
+  }).catch(function() {
+    document.getElementById('rep-loading').innerHTML =
+      '<span style="color:var(--red);">Error loading report.</span>';
+  });
+}
+
+function renderReport(d) {
+  var noPipeline = !d.has_pipeline;
+  var noQR       = !d.has_qr;
+  var html = '';
+
+  // ── KPI row ───────────────────────────────────────────────────
+  html += '<div class="kpi-row">';
+  html += kpi('Total Keywords (Full Pipeline)', noPipeline ? '—' : d.total_keywords, 'var(--text)');
+  html += kpi('Ranked',           noPipeline ? '—' : d.ranked_count,  'var(--green)');
+  html += kpi('Not Found',        noPipeline ? '—' : d.not_found,     'var(--red)');
+  html += kpi('Errors / Pending', noPipeline ? '—' : d.error_count,   'var(--yellow)');
+  html += kpi('Quick Run Batch',  noQR ? '0' : String(d.qr_batch),  (d.qr_batch  ? 'var(--accent2)' : 'var(--muted)'));
+  html += kpi('Quick Run Single', noQR ? '0' : String(d.qr_single), (d.qr_single ? 'var(--cyan)'    : 'var(--muted)'));
+  html += '</div>';
+
+  // ── Summary two-col ───────────────────────────────────────────
+  html += '<div class="two-col" style="margin-bottom:14px;">';
+
+  // Full Pipeline card
+  html += '<div class="card" style="margin-bottom:0;">';
+  html += '<div class="card-title">📊 Full Pipeline</div>';
+  if (noPipeline) {
+    html += '<div class="alert alert-warn" style="margin:0;">no pipeline_run running</div>';
+  } else {
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 20px;">';
+    html += infoRow('Total Colleges',        d.total_colleges);
+    html += infoRow('Total Keywords',         d.total_keywords);
+    html += infoRow('Tracked On',             d.tracked_on || '—');
+    html += infoRow('Ranking Gain',           d.ranking_gain);
+    html += infoRow('Ranking Dropped',        d.ranking_dropped);
+    html += infoRow('Report Generation Date', d.generated_at);
+    html += '</div>';
+  }
+  html += '</div>';
+
+  // Quick Run card
+  html += '<div class="card" style="margin-bottom:0;">';
+  html += '<div class="card-title">🚀 Quick Run</div>';
+  if (noQR) {
+    html += '<div class="alert alert-warn" style="margin:0;">no quick_run run</div>';
+  } else {
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 20px;">';
+    html += infoRow('Total Colleges',        d.qr_total_colleges);
+    html += infoRow('Total Keywords',         d.qr_total_keywords);
+    html += infoRow('Tracked On',             d.qr_tracked_on || '—');
+    html += infoRow('Report Generation Date', d.generated_at);
+    html += '</div>';
+  }
+  html += '</div>';
+
+  html += '</div>'; // end two-col
+
+  // ── Charts ────────────────────────────────────────────────────
+  html += '<div class="chart-row">';
+  html += '<div class="chart-card"><h4>Ranking Status</h4><canvas id="ch-status"></canvas></div>';
+  html += '<div class="chart-card"><h4>Silo Breakdown</h4><canvas id="ch-silo"></canvas></div>';
+  html += '</div>';
+
+  // ── Full Pipeline Data table ──────────────────────────────────
+  var silos = d.present_silos || [];
+  var prows = d.pipeline_rows || [];
+  if (!noPipeline && silos.length && prows.length) {
+    var thBase = 'background:var(--bg3);padding:7px 10px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border);white-space:nowrap;';
+    var thSilo = 'background:var(--bg4);padding:6px 10px;text-align:center;font-size:10px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border);border-left:2px solid var(--border-lt);white-space:nowrap;';
+    var thSub  = 'background:var(--bg3);padding:5px 8px;text-align:left;font-size:9.5px;font-weight:600;color:var(--muted);text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap;';
+
+    html += '<div class="card">';
+    html += '<div class="card-title">Full Pipeline Data — ' + esc(String(d.total_keywords)) + ' keywords</div>';
+    html += '<div style="overflow-x:auto;border-radius:8px;border:1px solid var(--border);">';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:11.5px;">';
+    html += '<thead>';
+    // Row 1 — base cols + silo group headers
+    html += '<tr>';
+    html += '<th rowspan="2" style="' + thBase + '">College ID</th>';
+    html += '<th rowspan="2" style="' + thBase + '">Keywords</th>';
+    silos.forEach(function(st) {
+      html += '<th colspan="4" style="' + thSilo + '">' + esc(siloDisplay[st] || st) + '</th>';
+    });
+    html += '</tr>';
+    // Row 2 — sub-column headers
+    html += '<tr>';
+    silos.forEach(function(st, si) {
+      var bl = si > 0 ? 'border-left:2px solid var(--border-lt);' : '';
+      html += '<th style="' + thSub + bl + '">Prev Rank</th>';
+      html += '<th style="' + thSub + '">Prev Date</th>';
+      html += '<th style="' + thSub + '">Latest Rank</th>';
+      html += '<th style="' + thSub + '">Latest Date</th>';
+    });
+    html += '</tr>';
+    html += '</thead><tbody>';
+
+    prows.forEach(function(row) {
+      html += '<tr>';
+      html += '<td style="padding:5px 10px;font-size:11px;color:var(--muted);white-space:nowrap;">' + esc(row.college_id) + '</td>';
+      html += '<td style="padding:5px 10px;font-size:11px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + esc(row.keywords) + '">' + esc(row.keywords) + '</td>';
+      silos.forEach(function(st, si) {
+        var sd  = (row.silos && row.silos[st]) || {};
+        var pr  = sd.prev_rank  || '';
+        var pd  = sd.prev_date  || '';
+        var lr  = sd.latest_rank || '';
+        var ld  = sd.latest_date || '';
+        var bl  = si > 0 ? 'border-left:2px solid var(--border-lt);' : '';
+
+        var prBadge = pr ? (pr==='NOT_FOUND' ? '<span class="badge badge-red" style="font-size:9px;">NF</span>' : '<span class="badge badge-gray" style="font-size:9px;">' + esc(pr) + '</span>') : '';
+        var lrBadge = '';
+        if      (lr === 'NOT_FOUND') lrBadge = '<span class="badge badge-red" style="font-size:9px;">NOT FOUND</span>';
+        else if (lr === 'ERROR')     lrBadge = '<span class="badge badge-yellow" style="font-size:9px;">ERROR</span>';
+        else if (lr)                 lrBadge = '<span class="badge badge-blue" style="font-size:9px;">' + esc(lr) + '</span>';
+
+        html += '<td style="padding:5px 8px;' + bl + '">' + prBadge + '</td>';
+        html += '<td style="padding:5px 8px;font-size:10px;color:var(--muted);">' + esc(pd) + '</td>';
+        html += '<td style="padding:5px 8px;">' + lrBadge + '</td>';
+        html += '<td style="padding:5px 8px;font-size:10px;color:var(--muted);">' + esc(ld) + '</td>';
+      });
+      html += '</tr>';
+    });
+    html += '</tbody></table></div></div>';
+  } else if (!noPipeline) {
+    html += '<div class="card"><div class="alert alert-info">Pipeline data loaded — no silo columns detected yet.</div></div>';
+  }
+
+  document.getElementById('rep-content').innerHTML = html;
+
+  // ── Charts: Ranking Status doughnut ──────────────────────────
+  var ctx1 = document.getElementById('ch-status').getContext('2d');
+  var c1 = new Chart(ctx1, {
+    type:'doughnut',
+    data:{
+      labels:['Ranked','Not Found','Errors/Pending'],
+      datasets:[{
+        data:[d.ranked_count||0, d.not_found||0, d.error_count||0],
+        backgroundColor:['#10b981','#f04747','#f5a623'],
+        borderWidth:0, hoverOffset:4
+      }]
+    },
+    options:{
+      plugins:{legend:{labels:{color:'#a9b3d4',boxWidth:12,font:{size:11}}}},
+      cutout:'62%'
+    }
+  });
+  _charts.push(c1);
+
+  // ── Charts: Silo breakdown bar ────────────────────────────────
+  var siloKeys = Object.keys(d.silo_breakdown||{}).sort();
+  var siloVals = siloKeys.map(function(k){return d.silo_breakdown[k];});
+  var ctx2 = document.getElementById('ch-silo').getContext('2d');
+  var c2 = new Chart(ctx2, {
+    type:'bar',
+    data:{
+      labels:siloKeys,
+      datasets:[{label:'Keywords',data:siloVals,
+        backgroundColor:'rgba(79,114,251,0.6)',
+        borderRadius:5, borderWidth:0}]
+    },
+    options:{
+      plugins:{legend:{display:false}},
+      scales:{
+        x:{ticks:{color:'#6b7699',font:{size:10}},grid:{color:'#2c3252'}},
+        y:{ticks:{color:'#6b7699',font:{size:10}},grid:{color:'#2c3252'}}
+      }
+    }
+  });
+  _charts.push(c2);
+}
+
+function downloadReportPDF() {
+  toast('Generating ' + _reportPeriod + ' report PDF… please wait.', 'info');
+  var url = '/api/download/pdf?period=' + _reportPeriod;
+  fetch(url)
+    .then(function(r) {
+      var ct = r.headers.get('content-type') || '';
+      if (r.ok && ct.includes('pdf')) return r.blob();
+      return r.json().then(function(d) { throw new Error(d.error || 'Server error'); });
+    })
+    .then(function(blob) {
+      var a  = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'ranking_report_' + _reportPeriod + '_' + new Date().toISOString().slice(0,10) + '.pdf';
+      document.body.appendChild(a); a.click();
+      setTimeout(function() { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+      toast('Report PDF downloaded!', 'success');
+    })
+    .catch(function(e) { toast('PDF Error: ' + e.message, 'error'); });
+}
+
+function downloadReportCSV() {
+  toast('Preparing report CSV…', 'info');
+  var url = '/api/download/report-csv?period=' + _reportPeriod;
+  fetch(url)
+    .then(function(r) {
+      var ct = r.headers.get('content-type') || '';
+      if (r.ok && (ct.includes('csv') || ct.includes('text') || ct.includes('octet'))) return r.blob();
+      return r.json().then(function(d) { throw new Error(d.error || 'Server error'); });
+    })
+    .then(function(blob) {
+      var a  = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'ranking_report_' + _reportPeriod + '_' + new Date().toISOString().slice(0,10) + '.csv';
+      document.body.appendChild(a); a.click();
+      setTimeout(function() { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+      toast('Report CSV downloaded!', 'success');
+    })
+    .catch(function(e) { toast('CSV Error: ' + e.message, 'error'); });
+}
+
+// ── Email ─────────────────────────────────────────────────────────
+function loadRecipients() {
+  fetch('/api/email/recipients').then(r=>r.json()).then(d => renderChips(d.recipients||[]));
+}
+
+function renderChips(list) {
+  var el = document.getElementById('chip-list');
+  if (!list.length) {
+    el.innerHTML = '<span style="color:var(--muted);font-size:12px;">No recipients added yet.</span>';
+    return;
+  }
+  el.innerHTML = list.map(r =>
+    '<span class="chip"><b>' + esc(r.name||'') + '</b>' +
+    (r.name ? ' ' : '') + '<em>&lt;' + esc(r.email) + '&gt;</em>' +
+    '<span class="chip-del" onclick="removeRecipient(\'' + esc(r.email) + '\')">×</span></span>'
+  ).join('');
+}
+
+function addRecipient() {
+  var name  = document.getElementById('rec-name').value.trim();
+  var email = document.getElementById('rec-email').value.trim();
+  if (!email) { toast('Email is required', 'error'); return; }
+  fetch('/api/email/recipients', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, email})
+  }).then(r=>r.json()).then(d => {
+    if (d.error) { toast(d.error, 'error'); return; }
+    document.getElementById('rec-name').value  = '';
+    document.getElementById('rec-email').value = '';
+    renderChips(d.recipients);
+    toast('Recipient added.', 'success');
+  });
+}
+
+function removeRecipient(email) {
+  fetch('/api/email/recipients/'+encodeURIComponent(email),{method:'DELETE'})
+    .then(r=>r.json()).then(d => {
+      if (d.error) { toast(d.error,'error'); return; }
+      renderChips(d.recipients); toast('Removed.','success');
+    });
+}
+
+function smtpPwFocus(el) {
+  // When user clicks the password field, clear masked bullets so they can type new password
+  if (el.dataset.masked === '1') {
+    el.value = '';
+    el.dataset.masked = '0';
+    el.placeholder = 'Type new App Password here…';
+    document.getElementById('smtp-pw-badge').style.display = 'none';
+  }
+}
+
+function loadSmtpConfig() {
+  fetch('/api/email/config').then(r=>r.json()).then(d => {
+    document.getElementById('smtp-host').value = d.smtp_host||'';
+    document.getElementById('smtp-port').value = d.smtp_port||587;
+    document.getElementById('smtp-user').value = d.smtp_user||'';
+    document.getElementById('smtp-from').value = d.smtp_from||'';
+    var pwEl    = document.getElementById('smtp-password');
+    var badge   = document.getElementById('smtp-pw-badge');
+    var pwHint  = document.getElementById('smtp-pw-hint');
+    if (d.smtp_password_set) {
+      // Show masked bullets + green "SAVED" badge — user knows password is stored
+      pwEl.value        = '••••••••••••••••';
+      pwEl.dataset.masked = '1';
+      badge.style.display = '';
+      pwHint.style.display = '';
+    } else {
+      pwEl.value          = '';
+      pwEl.dataset.masked = '0';
+      badge.style.display  = 'none';
+      pwHint.style.display = 'none';
+    }
+  });
+}
+
+function saveSmtp() {
+  var pwEl = document.getElementById('smtp-password');
+  // Only send a new password if the user actually typed one (not just the masked placeholder)
+  var newPw = (pwEl.dataset.masked === '1') ? '' : pwEl.value;
+  var cfg = {
+    smtp_host:     document.getElementById('smtp-host').value.trim(),
+    smtp_port:     parseInt(document.getElementById('smtp-port').value)||587,
+    smtp_user:     document.getElementById('smtp-user').value.trim(),
+    smtp_password: newPw,
+    smtp_from:     document.getElementById('smtp-from').value.trim(),
+  };
+  fetch('/api/email/config', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(cfg)
+  }).then(r=>r.json()).then(d => {
+    toast(d.message||d.error, d.error?'error':'success');
+    if (!d.error) loadSmtpConfig();  // reload to show saved badge
+  });
+}
+
+function sendReport() {
+  var period = document.getElementById('send-period').value;
+  var fmt    = document.getElementById('send-format').value;
+  toast('Sending ' + period + ' report (' + fmt.toUpperCase() + ')… please wait.', 'info');
+  fetch('/api/email/send', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({period: period, format: fmt})
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.error) {
+      // Show the real SMTP / generation error directly
+      toast(d.error, 'error');
+    } else {
+      toast(d.message || 'Report sent!', 'success');
+    }
+  }).catch(function(e) { toast('Error: ' + e.message, 'error'); });
+}
+
+// ── Comparison ────────────────────────────────────────────────────
+var _cmpOldText   = null;
+var _cmpNewText   = null;
+var _cmpResult    = null;   // {present_silos, rows}
+var SILO_TYPES_JS = ['ADMISSIONS','FEES','PLACEMENTS','SCHOLARSHIPS','MAIN','SINGLE_COURSE'];
+var siloDisplayCmp= {
+  ADMISSIONS:'Admissions', FEES:'Fees', PLACEMENTS:'Placements',
+  SCHOLARSHIPS:'Scholarships', MAIN:'Main', SINGLE_COURSE:'Single Course'
+};
+
+function cmpFileChosen(which, input) {
+  var file     = input.files[0];
+  var statusEl = document.getElementById('cmp-' + which + '-status');
+  if (!file) { statusEl.textContent = ''; return; }
+  statusEl.textContent = '✓ ' + file.name + ' (' + (file.size/1024).toFixed(1) + ' KB)';
+  statusEl.style.color = 'var(--green)';
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    if (which === 'old') _cmpOldText = e.target.result;
+    else                 _cmpNewText = e.target.result;
+  };
+  reader.readAsText(file);
+}
+
+function _parseCsvLine(line) {
+  var result = [], current = '', inQuotes = false;
+  for (var i = 0; i < line.length; i++) {
+    var ch = line[i];
+    if (ch === '"') { inQuotes = !inQuotes; }
+    else if (ch === ',' && !inQuotes) { result.push(current.trim()); current = ''; }
+    else { current += ch; }
+  }
+  result.push(current.trim());
+  return result;
+}
+
+/* ── CSV format auto-detection ────────────────────────────────────
+   Two accepted formats:
+   A) Rankings CSV  (downloaded from Rankings page)
+      - single header row: College_Id, Course_Id, ..., ADMISSIONS, ADMISSIONS_URL, ...
+   B) Report CSV  (downloaded from Reports page / daily-report button)
+      - starts with === PIPELINE SUMMARY ===
+      - contains a === FULL PIPELINE DATA === section with a TWO-ROW header:
+          h1: College_Id, Keywords, Admissions, , , , Fees, , , , …
+          h2:          ,         , Prev Rank, Prev Date, Latest Rank, Latest Date, …
+      The "Latest Rank" column per silo is used as the representative rank.
+──────────────────────────────────────────────────────────────── */
+function parseRankingCSV(text) {
+  var rawLines = text.split('\n').map(function(l){ return l.replace(/\r$/,''); });
+  var nonEmpty = rawLines.filter(function(l){ return l.trim(); });
+  if (nonEmpty.length < 2) return null;
+
+  // Detect report CSV: first cell starts with === or equals "Metric"
+  var firstCell = (_parseCsvLine(nonEmpty[0])[0] || '').trim();
+  if (firstCell.indexOf('===') === 0 || firstCell.toLowerCase() === 'metric') {
+    return _parseReportCSV(rawLines);
+  }
+  return _parseRankingsCSV(nonEmpty);
+}
+
+/* Parse report CSV (downloaded from Reports / daily-report page) */
+function _parseReportCSV(rawLines) {
+  // Find the === FULL PIPELINE DATA === section
+  var dataStart = -1;
+  for (var i = 0; i < rawLines.length; i++) {
+    var c0 = (_parseCsvLine(rawLines[i])[0] || '').trim();
+    if (c0.indexOf('FULL PIPELINE DATA') !== -1) { dataStart = i + 1; break; }
+  }
+  if (dataStart === -1 || dataStart + 1 >= rawLines.length) return null;
+
+  // h1: silo group names (Admissions, Fees, …)
+  // h2: sub-column names (Previous Rank, Previous Rank Date, Latest Rank, Latest Rank Date, …)
+  var h1 = _parseCsvLine(rawLines[dataStart]);
+  // h2 not needed for column-position calc — position is always h1_col + 2
+
+  // Map display name → internal silo key and latest-rank column index
+  var siloDispToKey = {
+    'Admissions':'ADMISSIONS', 'Fees':'FEES', 'Placements':'PLACEMENTS',
+    'Scholarships':'SCHOLARSHIPS', 'Main':'MAIN', 'Single Course':'SINGLE_COURSE'
+  };
+  var siloLatestCol = {};   // st → col index of "Latest Rank"
+  var siloOrder     = [];
+
+  for (var ci = 2; ci < h1.length; ci++) {
+    var sName = h1[ci].trim();
+    if (siloDispToKey[sName]) {
+      var st = siloDispToKey[sName];
+      // Within each 4-col silo block: [Prev Rank, Prev Date, Latest Rank, Latest Date]
+      // "Latest Rank" is at offset +2 from the group-start column
+      siloLatestCol[st] = ci + 2;
+      siloOrder.push(st);
+    }
+  }
+  if (siloOrder.length === 0) return null;
+
+  // Extract "Tracked On" date from the summary section (lines before dataStart)
+  var trackedOn = '';
+  for (var ti = 0; ti < dataStart; ti++) {
+    var tc = _parseCsvLine(rawLines[ti]);
+    if ((tc[0] || '').trim().toLowerCase() === 'tracked on') {
+      trackedOn = (tc[1] || '').trim();
+      break;
+    }
+  }
+
+  // Parse data rows (skip two header rows; stop at blank or next === section)
+  var data = [];
+  for (var r = dataStart + 2; r < rawLines.length; r++) {
+    var line = rawLines[r];
+    if (!line.trim()) continue;
+    var cells = _parseCsvLine(line);
+    var c0v   = (cells[0] || '').trim();
+    if (!c0v) continue;
+    if (c0v.indexOf('===') === 0) break;   // reached next section (e.g. QUICK RUN SUMMARY)
+
+    var entry = {
+      college_id: c0v,
+      keywords:   (cells[1] || '').trim(),
+      siloRanks:  {}
+    };
+    siloOrder.forEach(function(st) {
+      var idx = siloLatestCol[st];
+      entry.siloRanks[st] = (idx < cells.length ? (cells[idx] || '') : '').trim();
+    });
+    data.push(entry);
+  }
+  return data.length ? { presentSilos: siloOrder, data: data, date: trackedOn } : null;
+}
+
+/* Parse rankings CSV (downloaded from Rankings page — raw sheet dump) */
+function _parseRankingsCSV(lines) {
+  // lines already filtered (non-empty)
+  var headers = _parseCsvLine(lines[0]);
+
+  // detect silo columns (mirrors Python _detect_silo_cols logic)
+  var siloRankCols = {};
+  var updatedCol   = -1;
+  for (var i = 0; i < headers.length; i++) {
+    var h = headers[i].toUpperCase().replace(/ /g,'_');
+    if (h.indexOf('UPDATED') !== -1) { updatedCol = i; continue; }
+    if (i <= 4) continue;
+    if (h.indexOf('_URL') !== -1) continue;
+    for (var si = 0; si < SILO_TYPES_JS.length; si++) {
+      var st = SILO_TYPES_JS[si];
+      if (h === st || h.indexOf(st+'_R') === 0) {
+        if (!siloRankCols[st]) siloRankCols[st] = [];
+        siloRankCols[st].push(i);
+        break;
+      }
+    }
+  }
+
+  var presentSilos = SILO_TYPES_JS.filter(function(s){ return siloRankCols[s]; });
+
+  // Extract date from the first non-empty "Updated" cell in data rows
+  var dateVal = '';
+  var data = [];
+  for (var r = 1; r < lines.length; r++) {
+    var row = _parseCsvLine(lines[r]);
+    if (!row[0] || !row[0].trim()) continue;
+
+    // Grab date from Updated column on first occurrence
+    if (!dateVal && updatedCol !== -1) {
+      var dv = (row[updatedCol] || '').trim();
+      if (dv) {
+        // Try to format as DD/MM/YY from ISO or keep as-is
+        var dp = new Date(dv);
+        if (!isNaN(dp)) {
+          var dd = String(dp.getDate()).padStart(2,'0');
+          var mm = String(dp.getMonth()+1).padStart(2,'0');
+          var yy = String(dp.getFullYear()).slice(-2);
+          dateVal = dd + '/' + mm + '/' + yy;
+        } else {
+          dateVal = dv;
+        }
+      }
+    }
+
+    var entry = {
+      college_id: (row[0]||'').trim(),
+      keywords:   (row[4]||'').trim(),   // col 4 = keyword in rankings CSV
+      siloRanks:  {}
+    };
+    for (var si2 = 0; si2 < presentSilos.length; si2++) {
+      var st2  = presentSilos[si2];
+      var cols = siloRankCols[st2];
+      var val  = '';
+      for (var ci2 = cols.length - 1; ci2 >= 0; ci2--) {
+        var v = (row[cols[ci2]]||'').trim();
+        if (v) { val = v; break; }
+      }
+      entry.siloRanks[st2] = val;
+    }
+    data.push(entry);
+  }
+  return { presentSilos: presentSilos, data: data, date: dateVal };
+}
+
+function runComparison() {
+  if (!_cmpOldText || !_cmpNewText) {
+    toast('Please select both Old and New CSV files.', 'error'); return;
+  }
+  document.getElementById('cmp-loading').style.display = '';
+  document.getElementById('cmp-result').style.display  = 'none';
+  document.getElementById('cmp-legend').style.display  = 'none';
+  document.getElementById('btn-cmp-csv').style.display = 'none';
+  document.getElementById('btn-cmp-pdf').style.display = 'none';
+  document.getElementById('cmp-count').textContent     = '';
+
+  try {
+    var oldP = parseRankingCSV(_cmpOldText);
+    var newP = parseRankingCSV(_cmpNewText);
+    if (!oldP || !newP) {
+      document.getElementById('cmp-loading').style.display = 'none';
+      toast('Could not parse CSV files. Check the file format.', 'error'); return;
+    }
+
+    // index new data by college_id + keyword
+    var newMap = {};
+    newP.data.forEach(function(r) {
+      newMap[r.college_id + '|||' + r.keywords] = r;
+    });
+
+    // union silos from both files, preserving SILO_TYPES_JS order
+    var allSilos = SILO_TYPES_JS.filter(function(st) {
+      return oldP.presentSilos.indexOf(st) !== -1 || newP.presentSilos.indexOf(st) !== -1;
+    });
+
+    var rows = [];
+    oldP.data.forEach(function(oldRow) {
+      var newRow = newMap[oldRow.college_id + '|||' + oldRow.keywords] || null;
+      var silos  = {};
+      allSilos.forEach(function(st) {
+        silos[st] = {
+          prev_rank:   oldRow.siloRanks[st] || '',
+          prev_date:   '',
+          latest_rank: newRow ? (newRow.siloRanks[st] || '') : '',
+          latest_date: ''
+        };
+      });
+      rows.push({ college_id: oldRow.college_id, keywords: oldRow.keywords, silos: silos });
+    });
+
+    _cmpResult = { present_silos: allSilos, rows: rows,
+                   old_date: oldP.date || '', new_date: newP.date || '' };
+    renderComparison(_cmpResult);
+
+    document.getElementById('cmp-loading').style.display = 'none';
+    document.getElementById('cmp-result').style.display  = '';
+    document.getElementById('cmp-legend').style.display  = '';
+    document.getElementById('btn-cmp-csv').style.display = '';
+    document.getElementById('btn-cmp-pdf').style.display = '';
+    document.getElementById('cmp-count').textContent     = rows.length + ' rows compared';
+  } catch(e) {
+    document.getElementById('cmp-loading').style.display = 'none';
+    toast('Comparison error: ' + e.message, 'error');
+  }
+}
+
+function renderComparison(data) {
+  var silos = data.present_silos || [];
+  var rows  = data.rows          || [];
+
+  if (!silos.length || !rows.length) {
+    document.getElementById('cmp-result').innerHTML =
+      '<div class="alert alert-warn">No matching rows found.</div>';
+    return;
+  }
+
+  var thBase = 'background:var(--bg3);padding:7px 10px;text-align:left;font-size:10px;font-weight:700;'
+             + 'color:var(--muted);text-transform:uppercase;letter-spacing:.04em;'
+             + 'border-bottom:1px solid var(--border);white-space:nowrap;';
+  var thSilo = 'background:var(--bg4);padding:6px 10px;text-align:center;font-size:10px;font-weight:700;'
+             + 'color:var(--accent2);text-transform:uppercase;letter-spacing:.04em;'
+             + 'border-bottom:1px solid var(--border);border-left:2px solid var(--border-lt);white-space:nowrap;';
+  var thSub  = 'background:var(--bg3);padding:5px 8px;text-align:left;font-size:9.5px;font-weight:600;'
+             + 'color:var(--muted);text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap;';
+
+  var html = '<div class="card">';
+  html += '<div class="card-title">Comparison Result — ' + esc(String(rows.length)) + ' rows</div>';
+  html += '<div style="overflow-x:auto;border-radius:8px;border:1px solid var(--border);">';
+  html += '<table style="width:100%;border-collapse:collapse;font-size:11.5px;">';
+  html += '<thead><tr>';
+  html += '<th rowspan="2" style="' + thBase + '">College ID</th>';
+  html += '<th rowspan="2" style="' + thBase + '">Keywords</th>';
+  silos.forEach(function(st) {
+    html += '<th colspan="2" style="' + thSilo + '">' + esc(siloDisplayCmp[st]||st) + '</th>';
+  });
+  var oldDate = data.old_date ? ' (' + esc(data.old_date) + ')' : '';
+  var newDate = data.new_date ? ' (' + esc(data.new_date) + ')' : '';
+  html += '</tr><tr>';
+  silos.forEach(function(st, si) {
+    var bl = si > 0 ? 'border-left:2px solid var(--border-lt);' : '';
+    html += '<th style="' + thSub + bl + '">Prev Rank' + oldDate + '</th>';
+    html += '<th style="' + thSub + '">Latest Rank' + newDate + '</th>';
+  });
+  html += '</tr></thead><tbody>';
+
+  rows.forEach(function(row) {
+    html += '<tr>';
+    html += '<td style="padding:5px 10px;font-size:11px;color:var(--muted);white-space:nowrap;">' + esc(row.college_id) + '</td>';
+    html += '<td style="padding:5px 10px;font-size:11px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + esc(row.keywords) + '">' + esc(row.keywords) + '</td>';
+    silos.forEach(function(st, si) {
+      var sd  = (row.silos && row.silos[st]) || {};
+      var pr  = sd.prev_rank   || '';
+      var lr  = sd.latest_rank || '';
+      var bl  = si > 0 ? 'border-left:2px solid var(--border-lt);' : '';
+
+      // colour: lower rank# = improved = green
+      var cellBg = '';
+      if (lr && lr !== 'NOT_FOUND' && lr !== 'ERROR') {
+        var lrN = parseInt(lr), prN = parseInt(pr);
+        if (!isNaN(lrN) && !isNaN(prN)) {
+          if      (lrN < prN) cellBg = 'background:rgba(16,185,129,0.18);';   // improved
+          else if (lrN > prN) cellBg = 'background:rgba(240,71,71,0.18);';    // dropped
+          else                cellBg = 'background:rgba(245,166,35,0.18);';   // same
+        } else {
+          cellBg = 'background:rgba(245,166,35,0.18);';
+        }
+      }
+
+      var prBadge = '';
+      if (pr === 'NOT_FOUND') prBadge = '<span class="badge badge-red" style="font-size:9px;">NF</span>';
+      else if (pr)            prBadge = '<span class="badge badge-gray" style="font-size:9px;">' + esc(pr) + '</span>';
+
+      var lrBadge = '';
+      if      (lr === 'NOT_FOUND') lrBadge = '<span class="badge badge-red" style="font-size:9px;">NOT FOUND</span>';
+      else if (lr === 'ERROR')     lrBadge = '<span class="badge badge-yellow" style="font-size:9px;">ERROR</span>';
+      else if (lr)                 lrBadge = '<span class="badge badge-blue" style="font-size:9px;">' + esc(lr) + '</span>';
+
+      html += '<td style="padding:5px 8px;' + bl + '">' + prBadge + '</td>';
+      html += '<td style="padding:5px 8px;' + cellBg + '">' + lrBadge + '</td>';
+    });
+    html += '</tr>';
+  });
+
+  html += '</tbody></table></div></div>';
+  document.getElementById('cmp-result').innerHTML = html;
+}
+
+function downloadComparisonExcel() {
+  if (!_cmpResult) { toast('Run a comparison first.', 'error'); return; }
+  toast('Generating Excel with colors… please wait.', 'info');
+  fetch('/api/compare/xlsx', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(_cmpResult)
+  })
+  .then(function(r) {
+    var ct = r.headers.get('content-type') || '';
+    if (r.ok && (ct.includes('spreadsheet') || ct.includes('excel') || ct.includes('octet')))
+      return r.blob();
+    return r.json().then(function(d){ throw new Error(d.error || 'Server error'); });
+  })
+  .then(function(blob) {
+    var a    = document.createElement('a');
+    a.href   = URL.createObjectURL(blob);
+    a.download = 'comparison_' + new Date().toISOString().slice(0,10) + '.xlsx';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    toast('Comparison Excel downloaded!', 'success');
+  })
+  .catch(function(e){ toast('Excel Error: ' + e.message, 'error'); });
+}
+
+function downloadComparisonPDF() {
+  if (!_cmpResult) { toast('Run a comparison first.', 'error'); return; }
+  toast('Generating comparison PDF… please wait.', 'info');
+  fetch('/api/compare/pdf', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(_cmpResult)
+  })
+  .then(function(r) {
+    var ct = r.headers.get('content-type') || '';
+    if (r.ok && ct.includes('pdf')) return r.blob();
+    return r.json().then(function(d){ throw new Error(d.error || 'Server error'); });
+  })
+  .then(function(blob) {
+    var a    = document.createElement('a');
+    a.href   = URL.createObjectURL(blob);
+    a.download = 'comparison_' + new Date().toISOString().slice(0,10) + '.pdf';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    toast('Comparison PDF downloaded!', 'success');
+  })
+  .catch(function(e){ toast('PDF Error: ' + e.message, 'error'); });
+}
+
+// ── Logs ──────────────────────────────────────────────────────────
+function loadLogs() {
+  fetch('/api/logs?lines=200').then(r=>r.json()).then(d => {
+    clearTerm('term-logs');
+    (d.lines||[]).forEach(l => appendTerm('term-logs', l, lineClass(l)));
+    document.getElementById('term-logs').scrollTop = 9999;
+  });
+}
+
+// ── Helpers ───────────────────────────────────────────────────────
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function set(id, val) {
+  var el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+function setC(id, val, color) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = val;
+  if (color) el.style.color = color;
+}
+function kpi(label, val, color) {
+  return '<div class="kpi"><div class="kpi-label">'+esc(label)+'</div><div class="kpi-val" style="color:'+color+'">'+esc(String(val))+'</div></div>';
+}
+function infoRow(label, val) {
+  return '<div><div style="font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;">'+esc(label)+'</div><div style="font-size:14px;font-weight:600;margin-top:2px;">'+esc(String(val))+'</div></div>';
+}
+
+// ── Init ──────────────────────────────────────────────────────────
+refreshStatus();
+setInterval(refreshStatus, 30000);
+</script>
+</body>
+</html>

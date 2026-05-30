@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Collegedunia Article Ranking Pipeline — Full Diagram</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+    background: #f8fafc;
+    color: #1e293b;
+    font-size: 13px;
+    padding: 32px 28px 48px;
+  }
+
+  /* ── Print ── */
+  @media print {
+    body { background: #fff; padding: 16px; font-size: 11px; }
+    .no-print { display: none !important; }
+    .section { break-inside: avoid; }
+  }
+
+  /* ── Page header ── */
+  .page-header {
+    text-align: center;
+    margin-bottom: 28px;
+  }
+  .page-header h1 {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    color: #0f172a;
+  }
+  .page-header p {
+    color: #64748b;
+    font-size: 12px;
+    margin-top: 4px;
+  }
+  .print-btn {
+    display: inline-block;
+    margin-top: 10px;
+    padding: 8px 22px;
+    background: #1d4ed8;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .print-btn:hover { background: #1e40af; }
+
+  /* ── Legend ── */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px 24px;
+    justify-content: center;
+    margin-bottom: 28px;
+    padding: 12px 16px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    max-width: 860px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .li { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #334155; }
+  .ld { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+
+  /* ── Section wrapper ── */
+  .section {
+    max-width: 960px;
+    margin: 0 auto 20px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+  .section-title {
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.9px;
+    color: #94a3b8;
+    margin-bottom: 14px;
+    padding-bottom: 8px;
+    border-bottom: 1.5px solid #f1f5f9;
+  }
+  .section-title span {
+    font-size: 13px;
+    background: #1d4ed8;
+    color: #fff;
+    border-radius: 50%;
+    width: 20px; height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+
+  /* ── Card row ── */
+  .row {
+    display: flex;
+    gap: 10px;
+    align-items: stretch;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .row:last-child { margin-bottom: 0; }
+
+  /* ── Cards ── */
+  .card {
+    flex: 1;
+    min-width: 140px;
+    border-radius: 7px;
+    padding: 11px 13px;
+    border-left: 3px solid;
+  }
+  .card-title { font-weight: 700; font-size: 12px; margin-bottom: 4px; line-height: 1.3; }
+  .card-body  { font-size: 11px; color: #475569; line-height: 1.55; }
+  .card-body code {
+    background: #f1f5f9;
+    border-radius: 3px;
+    padding: 0 3px;
+    font-size: 10.5px;
+    font-family: 'Courier New', monospace;
+    color: #1d4ed8;
+  }
+
+  /* Colour themes */
+  .t-sheet   { background: #eff6ff; border-color: #3b82f6; }
+  .t-py      { background: #fff7ed; border-color: #f97316; }
+  .t-gas     { background: #f0fdf4; border-color: #22c55e; }
+  .t-state   { background: #fdf4ff; border-color: #a855f7; }
+  .t-ext     { background: #fff1f2; border-color: #f43f5e; }
+  .t-logic   { background: #f8fafc; border-color: #94a3b8; }
+  .t-qr      { background: #fefce8; border-color: #eab308; }
+  .t-lock    { background: #fef2f2; border-color: #ef4444; }
+
+  /* ── Arrow ── */
+  .arr {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    color: #94a3b8;
+    flex-shrink: 0;
+    padding: 0 2px;
+    align-self: center;
+  }
+  .arr-down {
+    text-align: center;
+    font-size: 20px;
+    color: #94a3b8;
+    margin: 4px 0;
+  }
+
+  /* ── Badge ── */
+  .badge {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 10px;
+    margin-top: 5px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .b-sheet  { background: #dbeafe; color: #1d4ed8; }
+  .b-py     { background: #ffedd5; color: #c2410c; }
+  .b-gas    { background: #dcfce7; color: #15803d; }
+  .b-state  { background: #f3e8ff; color: #7e22ce; }
+  .b-ext    { background: #ffe4e6; color: #be123c; }
+  .b-qr     { background: #fef9c3; color: #854d0e; }
+  .b-lock   { background: #fee2e2; color: #b91c1c; }
+
+  /* ── Wide card (span full row) ── */
+  .card-wide { flex: 100%; min-width: 100%; }
+
+  /* ── Divider ── */
+  hr.div {
+    border: none;
+    border-top: 2px dashed #e2e8f0;
+    margin: 0 0 20px;
+    max-width: 960px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* ── Stats row ── */
+  .stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 4px;
+  }
+  .stat {
+    flex: 1;
+    min-width: 90px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 7px;
+    padding: 10px;
+    text-align: center;
+  }
+  .stat-num  { font-size: 22px; font-weight: 800; }
+  .stat-label{ font-size: 10px; color: #64748b; margin-top: 3px; line-height: 1.4; }
+
+  /* ── QR section highlight ── */
+  .section.qr-section { border: 2px solid #eab308; background: #fffef0; }
+  .section.qr-section .section-title { color: #854d0e; }
+
+  /* ── Flow sub-label ── */
+  .sub { font-size: 10px; color: #94a3b8; margin-bottom: 6px; font-style: italic; }
+</style>
+</head>
+<body>
+
+<!-- Page header -->
+<div class="page-header">
+  <h1>Collegedunia Article Ranking Pipeline</h1>
+  <p>Full architecture — Automatic Pipeline + Quick Run (on-demand)</p>
+  <button class="print-btn no-print" onclick="window.print()">🖨 Print / Save as PDF</button>
+</div>
+
+<!-- Legend -->
+<div class="legend">
+  <div class="li"><div class="ld" style="background:#3b82f6"></div> Google Sheet Tab</div>
+  <div class="li"><div class="ld" style="background:#f97316"></div> Python Script</div>
+  <div class="li"><div class="ld" style="background:#22c55e"></div> Apps Script (GAS)</div>
+  <div class="li"><div class="ld" style="background:#a855f7"></div> State / Config</div>
+  <div class="li"><div class="ld" style="background:#f43f5e"></div> External API</div>
+  <div class="li"><div class="ld" style="background:#eab308"></div> Quick Run (on-demand)</div>
+  <div class="li"><div class="ld" style="background:#ef4444"></div> Lock Mechanism</div>
+</div>
+
+
+<!-- ①  TRIGGER -->
+<div class="section">
+  <div class="section-title"><span>1</span> TRIGGER — runs daily at midnight OR manually</div>
+  <div class="row">
+    <div class="card t-state">
+      <div class="card-title">🕛 Cron Job</div>
+      <div class="card-body">Auto-created on first run.<br><code>0 0 * * *</code> — every day at midnight.<br>Tag: <code># article-ranking-pipeline-auto</code></div>
+      <div><span class="badge b-state">crontab</span></div>
+    </div>
+    <div class="arr">→</div>
+    <div class="card t-py">
+      <div class="card-title">run_pipeline.py</div>
+      <div class="card-body">Master orchestrator. Calls Stage 1 → 2 → 3 in sequence. Handles all exit codes and errors.</div>
+      <div><span class="badge b-py">Python</span></div>
+    </div>
+    <div class="arr">→</div>
+    <div class="card t-state" style="flex:0.7">
+      <div class="card-title">pipeline_state.json</div>
+      <div class="card-body"><code>spreadsheet_id</code><br><code>script_id</code><br><code>run_number</code><br><code>phase1_last_run</code><br><code>pipeline_lock</code> ← new</div>
+      <div><span class="badge b-state">JSON config</span></div>
+    </div>
+    <div class="arr">→</div>
+    <div class="card t-lock" style="flex:0.9">
+      <div class="card-title">🔒 Set Lock</div>
+      <div class="card-body">Writes <code>pipeline_lock</code> timestamp to state. Blocks Quick Run while pipeline is active. Cleared on finish/crash via <code>atexit</code>.</div>
+      <div><span class="badge b-lock">Lock</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ②  STAGE 1 -->
+<div class="section">
+  <div class="section-title"><span>2</span> STAGE 1 — phase1_populate.py — Decides WHAT to rank today</div>
+
+  <div class="sub">Reads sheets → 15-day cycle check → smart selection → writes Intermediate + Final</div>
+
+  <div class="row">
+    <div class="card t-sheet">
+      <div class="card-title">📋 Source Sheet</div>
+      <div class="card-body">All colleges + courses. Every row = one college-course pair. Col Z1 = run_start_col for Apps Script.</div>
+      <div><span class="badge b-sheet">GSheet</span></div>
+    </div>
+    <div class="card t-sheet">
+      <div class="card-title">📊 Content Sheet</div>
+      <div class="card-body">Has <strong>Add</strong> column (Search Volume + Traffic combined). Used to score and sort colleges for selection.</div>
+      <div><span class="badge b-sheet">GSheet</span></div>
+    </div>
+    <div class="card t-sheet">
+      <div class="card-title">🗂 Intermediate</div>
+      <div class="card-body">Keyword rows. Cols A–D = identity, E = keyword, F = Rank, G = URL, H = updated_at (timestamp).</div>
+      <div><span class="badge b-sheet">GSheet</span></div>
+    </div>
+    <div class="card t-sheet">
+      <div class="card-title">📁 Final Sheet</div>
+      <div class="card-body">One row per college. Cols A–E fixed. Adds 13 cols per run rightward (6 rank + 6 URL + 1 updated_at).</div>
+      <div><span class="badge b-sheet">GSheet</span></div>
+    </div>
+  </div>
+
+  <div style="margin: 12px 0 8px"><strong style="font-size:11px;color:#334155">Selection logic inside phase1_populate.py:</strong></div>
+  <div class="row">
+    <div class="card t-py">
+      <div class="card-title">🔄 15-Day Cycle Check</div>
+      <div class="card-body">Reads <code>updated_at</code> per college from Intermediate. If today − last_ranked ≥ 15 days → due. New colleges (not in Intermediate) → always due.</div>
+      <div><span class="badge b-py">Python logic</span></div>
+    </div>
+    <div class="card t-py">
+      <div class="card-title">📐 Smart Select (cap 550)</div>
+      <div class="card-body">Sort due colleges by Add desc → groups of <strong>50</strong> → pick top <strong>40%</strong> from each group → stop at <strong>550</strong> total.</div>
+      <div><span class="badge b-py">Python logic</span></div>
+    </div>
+    <div class="card t-logic">
+      <div class="card-title">⏳ Deferred New Colleges</div>
+      <div class="card-body">Quota full? Identity row added to Final immediately. Keyword rows deferred to next run.</div>
+    </div>
+    <div class="card t-logic">
+      <div class="card-title">🚫 Exit Code 2</div>
+      <div class="card-body">All colleges within 15-day window → pipeline exits cleanly with code 2. No error — run_pipeline.py shows clean message.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ③  STAGE 2 -->
+<div class="section">
+  <div class="section-title"><span>3</span> STAGE 2 — Apps Script (intermediate_apps_script.js) — Fetches rankings</div>
+
+  <div class="row">
+    <div class="card t-py" style="flex:0.9">
+      <div class="card-title">run_pipeline.py loop</div>
+      <div class="card-body">Calls <code>checkRanksBatched()</code> via Apps Script Execution API. Polls every 15s. Repeats up to <strong>70 rounds</strong> until 0 unranked rows.</div>
+      <div><span class="badge b-py">Python → GAS</span></div>
+    </div>
+    <div class="arr">→</div>
+    <div class="card t-gas">
+      <div class="card-title">⚡ Parallel fetchAll</div>
+      <div class="card-body">Batches of <strong>10</strong> concurrent Bright Data requests. 500ms sleep between batches. Stops at <strong>5.5 min</strong> (Apps Script limit).</div>
+      <div><span class="badge b-gas">UrlFetchApp.fetchAll</span></div>
+    </div>
+    <div class="arr">→</div>
+    <div class="card t-ext">
+      <div class="card-title">🌐 Bright Data SERP</div>
+      <div class="card-body">Real mobile Google search results per keyword. Returns JSON rank + URL.</div>
+      <div><span class="badge b-ext">External API</span></div>
+    </div>
+    <div class="arr">→</div>
+    <div class="card t-gas">
+      <div class="card-title">✍ Write Results</div>
+      <div class="card-body">Intermediate: rank, URL, timestamp (cols F–H). Final: silo columns in current run block. <code>flush()</code> once per batch.</div>
+      <div><span class="badge b-gas">GAS writes</span></div>
+    </div>
+  </div>
+
+  <div style="margin:10px 0 8px"><strong style="font-size:11px;color:#334155">After main batch — automatic recovery passes:</strong></div>
+  <div class="row">
+    <div class="card t-gas">
+      <div class="card-title">🔁 recheckNotFound</div>
+      <div class="card-body">Re-fetches all NOT_FOUND rows. If rank found now, overwrites NOT_FOUND with actual rank.</div>
+      <div><span class="badge b-gas">GAS</span></div>
+    </div>
+    <div class="card t-gas">
+      <div class="card-title">🔁 recheckCleared</div>
+      <div class="card-body">Re-fetches all CLEARED rows. Allows rank recovery if college page reappears.</div>
+      <div><span class="badge b-gas">GAS</span></div>
+    </div>
+    <div class="card t-gas">
+      <div class="card-title">🔁 retryErrorRows</div>
+      <div class="card-body">One-pass retry for ERROR rows. Success → overwrites with real rank. Still error → leaves as ERROR for manual fix.</div>
+      <div><span class="badge b-gas">GAS</span></div>
+    </div>
+    <div class="card t-gas">
+      <div class="card-title">🛡 ensureFinalColumnFormats</div>
+      <div class="card-body">Calls <code>setNumberFormat("@")</code> on all 13 run columns in Final to prevent date-format corruption.</div>
+      <div><span class="badge b-gas">GAS</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ④  STAGE 3 -->
+<div class="section">
+  <div class="section-title"><span>4</span> STAGE 3 — phase2_build_master.py — History to Content tab</div>
+  <div class="row">
+    <div class="card t-sheet" style="flex:0.8">
+      <div class="card-title">🗂 Intermediate Sheet</div>
+      <div class="card-body">Source of ranked data with timestamps. All silos for all colleges.</div>
+      <div><span class="badge b-sheet">GSheet</span></div>
+    </div>
+    <div class="arr">→</div>
+    <div class="card t-py">
+      <div class="card-title">phase2_build_master.py</div>
+      <div class="card-body">Aggregates all ranked rows. Builds/updates historical rank columns in Content. Saves <code>phase2_last_run</code> to state.</div>
+      <div><span class="badge b-py">Python</span></div>
+    </div>
+    <div class="arr">→</div>
+    <div class="card t-sheet" style="flex:0.8">
+      <div class="card-title">📊 Content Sheet</div>
+      <div class="card-body">Gets updated. <strong>Add column</strong> here drives smart selection in the next run's Phase 1.</div>
+      <div><span class="badge b-sheet">GSheet</span></div>
+    </div>
+    <div class="arr">→</div>
+    <div class="card t-lock" style="flex:0.7">
+      <div class="card-title">🔓 Clear Lock</div>
+      <div class="card-body">Pipeline finished → <code>pipeline_lock</code> removed from state. Quick Run is unblocked automatically.</div>
+      <div><span class="badge b-lock">atexit</span></div>
+    </div>
+  </div>
+</div>
+
+<hr class="div">
+
+<!-- ⑤  QUICK RUN -->
+<div class="section qr-section">
+  <div class="section-title"><span>5</span> QUICK RUN — quick_run.py — On-demand ranking (separate command)</div>
+
+  <div class="row">
+    <div class="card t-lock" style="flex:0.8">
+      <div class="card-title">🔒 Lock Check</div>
+      <div class="card-body">Reads <code>pipeline_lock</code> from state. If set → exits immediately with message. Run <code>clear_lock.py</code> if stale.</div>
+      <div><span class="badge b-lock">Guard</span></div>
+    </div>
+    <div class="arr">→</div>
+    <div class="card t-qr">
+      <div class="card-title">💬 Interactive CLI</div>
+      <div class="card-body">Asks: <strong>Batch</strong> or <strong>College</strong>?<br>Batch → asks batch number.<br>College → asks College ID.<br>Shows summary, asks confirm.</div>
+      <div><span class="badge b-qr">quick_run.py</span></div>
+    </div>
+    <div class="arr">→</div>
+    <div class="card t-sheet">
+      <div class="card-title">📋 Source + Content</div>
+      <div class="card-body">Reads Source for college/course data. Reads Content for Add values (needed for batch ranking/sorting).</div>
+      <div><span class="badge b-sheet">GSheet</span></div>
+    </div>
+  </div>
+
+  <div style="margin:12px 0 8px"><strong style="font-size:11px;color:#854d0e">Two selection modes:</strong></div>
+  <div class="row">
+    <div class="card t-qr">
+      <div class="card-title">📦 Batch Mode</div>
+      <div class="card-body">
+        Enter batch number (e.g. <strong>2</strong>).<br>
+        Sort ALL colleges by Add desc.<br>
+        Take rows <strong>#51–#100</strong> (batch 2).<br>
+        Pick top <strong>40%</strong> = 20 colleges.<br>
+        Same logic as main pipeline.
+      </div>
+      <div><span class="badge b-qr">Batch N</span></div>
+    </div>
+    <div class="arr">or</div>
+    <div class="card t-qr">
+      <div class="card-title">🏫 College Mode</div>
+      <div class="card-body">
+        Enter a College ID.<br>
+        Finds <strong>all courses</strong> for that college in Source.<br>
+        Generates keyword rows for all courses — all silos.<br>
+        All courses ranked, not just one.
+      </div>
+      <div><span class="badge b-qr">College ID</span></div>
+    </div>
+    <div class="arr">→</div>
+    <div class="card t-qr">
+      <div class="card-title">📝 Build QR Sheets</div>
+      <div class="card-body">
+        <strong>CLEAR</strong> Quick Run Intermediate + Quick Run Final.<br>
+        Write keyword rows + identity rows fresh.<br>
+        Always Run-1 format (cols F–R).
+      </div>
+      <div><span class="badge b-qr">quick_run.py</span></div>
+    </div>
+    <div class="arr">→</div>
+    <div class="card t-gas">
+      <div class="card-title">⚡ checkQuickRunRanks()</div>
+      <div class="card-body">
+        Same GAS project, new function.<br>
+        Works on QR sheets only.<br>
+        Same parallel fetchAll + retry logic.<br>
+        Called via same <code>script_id</code>.
+      </div>
+      <div><span class="badge b-gas">GAS</span></div>
+    </div>
+  </div>
+
+  <div style="margin:12px 0 8px"><strong style="font-size:11px;color:#854d0e">Quick Run output sheets (dedicated, always cleared before new run):</strong></div>
+  <div class="row">
+    <div class="card t-qr">
+      <div class="card-title">📗 Quick Run Intermediate</div>
+      <div class="card-body">Same 8-column format as main Intermediate. Cleared every run. Shows rank + URL + timestamp per keyword.</div>
+      <div><span class="badge b-qr">QR sheet</span></div>
+    </div>
+    <div class="card t-qr">
+      <div class="card-title">📘 Quick Run Final</div>
+      <div class="card-body">Same format as main Final. Always Run-1 (cols F–R). Silo columns filled by checkQuickRunRanks(). Cleared every run.</div>
+      <div><span class="badge b-qr">QR sheet</span></div>
+    </div>
+    <div class="card t-gas">
+      <div class="card-title">quick_run_apps_script.js</div>
+      <div class="card-body">Paste into existing Apps Script project as a new file. No new deployment needed — same script_id, new function name.</div>
+      <div><span class="badge b-gas">Add to GAS project</span></div>
+    </div>
+    <div class="card t-lock">
+      <div class="card-title">clear_lock.py</div>
+      <div class="card-body">Run if pipeline crashed and left stale lock. Removes <code>pipeline_lock</code> from state so Quick Run works again.</div>
+      <div><span class="badge b-lock">Utility</span></div>
+    </div>
+  </div>
+</div>
+
+<hr class="div">
+
+<!-- ⑥  FINAL SHEET STRUCTURE -->
+<div class="section">
+  <div class="section-title"><span>6</span> FINAL SHEET — grows rightward each run</div>
+  <div class="row">
+    <div class="card t-sheet">
+      <div class="card-title">Cols A–E (fixed)</div>
+      <div class="card-body">College_Id, Course_Id, College_Name, Course_Name, Keywords</div>
+    </div>
+    <div class="arr">+</div>
+    <div class="card t-sheet">
+      <div class="card-title">Run 1: cols F–R (13 cols)</div>
+      <div class="card-body">6 rank + 6 URL + 1 Updated_at. All cells set to Plain Text to prevent date corruption (<code>setNumberFormat("@")</code>).</div>
+    </div>
+    <div class="arr">+</div>
+    <div class="card t-sheet">
+      <div class="card-title">Run 2: cols S–AE (+13)</div>
+      <div class="card-body">Same 13-col block repeats. <code>run_start_col</code> stored in Source!Z1 for Apps Script to read.</div>
+    </div>
+    <div class="arr">+</div>
+    <div class="card t-sheet" style="flex:0.5">
+      <div class="card-title">Run N…</div>
+      <div class="card-body">Continues indefinitely. Each run = +13 cols.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ⑦  KEY NUMBERS -->
+<div class="section">
+  <div class="section-title"><span>7</span> KEY NUMBERS</div>
+  <div class="stats">
+    <div class="stat"><div class="stat-num" style="color:#3b82f6">550</div><div class="stat-label">Max colleges ranked per auto-run</div></div>
+    <div class="stat"><div class="stat-num" style="color:#22c55e">15</div><div class="stat-label">Days before re-rank cycle</div></div>
+    <div class="stat"><div class="stat-num" style="color:#f97316">50</div><div class="stat-label">Sub-group size for smart select</div></div>
+    <div class="stat"><div class="stat-num" style="color:#a855f7">40%</div><div class="stat-label">Picked from each sub-group</div></div>
+    <div class="stat"><div class="stat-num" style="color:#f43f5e">10</div><div class="stat-label">Parallel requests per batch (GAS)</div></div>
+    <div class="stat"><div class="stat-num" style="color:#0ea5e9">5.5m</div><div class="stat-label">Max Apps Script runtime per call</div></div>
+    <div class="stat"><div class="stat-num" style="color:#64748b">70</div><div class="stat-label">Max rounds per auto-run</div></div>
+    <div class="stat"><div class="stat-num" style="color:#eab308">30</div><div class="stat-label">Max rounds per Quick Run</div></div>
+  </div>
+</div>
+
+<!-- ⑧  FILES -->
+<div class="section">
+  <div class="section-title"><span>8</span> FILE REFERENCE</div>
+  <div class="row">
+    <div class="card t-py" style="flex:2">
+      <div class="card-title">Python files</div>
+      <div class="card-body">
+        <code>run_pipeline.py</code> — main orchestrator (sets lock)<br>
+        <code>phase1_populate.py</code> — smart select + Intermediate + Final<br>
+        <code>phase2_build_master.py</code> — Intermediate → Content history<br>
+        <code>quick_run.py</code> — on-demand ranking CLI <span class="badge b-qr">new</span><br>
+        <code>clear_lock.py</code> — remove stale pipeline lock <span class="badge b-qr">new</span><br>
+        <code>setup.py</code> — one-time setup (credentials + deployment ID)
+      </div>
+    </div>
+    <div class="card t-gas" style="flex:1.5">
+      <div class="card-title">Apps Script files</div>
+      <div class="card-body">
+        <code>intermediate_apps_script.js</code> — main ranking (Intermediate + Final)<br>
+        <code>quick_run_apps_script.js</code> — QR ranking (Quick Run sheets) <span class="badge b-qr">new</span><br><br>
+        Both live in the <strong>same Apps Script project</strong>. One deployment covers all functions.
+      </div>
+    </div>
+    <div class="card t-sheet" style="flex:1.5">
+      <div class="card-title">Google Sheets (tabs)</div>
+      <div class="card-body">
+        <code>Source</code> — college-course master list<br>
+        <code>Intermediate</code> — keyword rows + ranks<br>
+        <code>Final</code> — silo ranks per run<br>
+        <code>Content</code> — Add scores + history<br>
+        <code>Quick Run Intermediate</code> — QR output <span class="badge b-qr">new</span><br>
+        <code>Quick Run Final</code> — QR output <span class="badge b-qr">new</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="text-align:center;color:#94a3b8;font-size:11px;margin-top:8px">
+  Collegedunia Article Ranking Pipeline &nbsp;|&nbsp; Generated on <script>document.write(new Date().toLocaleDateString('en-IN',{year:'numeric',month:'long',day:'numeric'}))</script>
+</div>
+
+</body>
+</html>

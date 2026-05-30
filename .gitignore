@@ -1,0 +1,34 @@
+# Google OAuth credentials — NEVER commit these
+credentials.json
+token.json
+
+# Runtime state files (auto-generated)
+pipeline_state.json
+qr_batch_state.json
+ui_config.json
+
+# Logs
+*.log
+pipeline_ui.log
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS junk
+.DS_Store
+__MACOSX/
+
+# Large data files (keep locally, not in repo)
+Colleges_Short_Form.csv
+credentials.json
+token.json
+file.txt
+pipeline_ui.log
+pipeline_state.json
+qr_batch_state.json
+__pycache__/
+.DS_Store
+*.pyc
+*.log
