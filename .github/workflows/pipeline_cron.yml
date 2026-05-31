@@ -26,6 +26,14 @@ jobs:
           echo '${{ secrets.GOOGLE_CREDENTIALS }}' > credentials.json
           echo '${{ secrets.GOOGLE_TOKEN }}' > token.json
 
+      - name: Write pipeline state from secret (if provided)
+        run: |
+          if [ -n "${{ secrets.PIPELINE_STATE }}" ]; then
+            echo '${{ secrets.PIPELINE_STATE }}' > pipeline_state.json
+          else
+            python setup.py
+          fi
+
       - name: Run pipeline
         run: python run_pipeline.py
 
