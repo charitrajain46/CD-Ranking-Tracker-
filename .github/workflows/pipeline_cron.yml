@@ -1,0 +1,52 @@
+name: Run Pipeline Every 15 Days
+
+on:
+  schedule:
+    - cron: '0 2 1,16 * *'   # Runs on 1st and 16th of every month at 2 AM UTC
+  workflow_dispatch:           # Also allows manual trigger from GitHub UI
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write credentials from secrets
+        run: |
+          echo '${{ secrets.GOOGLE_CREDENTIALS }}' > credentials.json
+          echo '${{ secrets.GOOGLE_TOKEN }}' > token.json
+
+      - name: Run pipeline
+        run: python run_pipeline.py
+
+      - name: Send email notification with result URL
+        if: always()   # Send email whether pipeline succeeded or failed
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.NOTIFY_EMAIL }}
+          password: ${{ secrets.NOTIFY_EMAIL_PASSWORD }}
+          to: ${{ secrets.NOTIFY_EMAIL }}
+          from: Collegedunia Pipeline Bot
+          subject: "Pipeline Run ${{ job.status == 'success' && '✅ Succeeded' || '❌ Failed' }} — ${{ github.run_id }}"
+          body: |
+            Pipeline run completed.
+
+            Status   : ${{ job.status }}
+            Run date : ${{ github.event.head_commit.timestamp }}
+
+            🔗 View full run logs:
+            https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Check your Google Sheet for the latest ranking results.
