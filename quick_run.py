@@ -650,6 +650,15 @@ def main():
         print("ERROR: Spreadsheet not found.")
         sys.exit(1)
 
+    # ── Auto-update Batch column in Source ────────────────────
+    # Runs every Quick Run so new colleges are assigned a batch
+    # number immediately when added to Source.
+    try:
+        from update_batches import update_source_batches
+        update_source_batches(sh)
+    except Exception as _ub_err:
+        print(f"  WARNING: Batch column update skipped ({_ub_err})")
+
     # ── Load Source + Content ─────────────────────────────────
     print("\nReading Source sheet …")
     all_source_records = parse_source(sh)

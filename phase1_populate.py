@@ -600,6 +600,15 @@ def main():
     inter_ws = sh.worksheet("Intermediate")
     print("  Source + Intermediate → found")
 
+    # ── Auto-update Batch column in Source ────────────────────
+    # Runs every pipeline execution so new colleges are assigned
+    # a batch number immediately when added to Source.
+    try:
+        from update_batches import update_source_batches
+        update_source_batches(sh)
+    except Exception as _ub_err:
+        print(f"  WARNING: Batch column update skipped ({_ub_err})")
+
     try:
         final_ws = sh.worksheet("Final")
         print("  Final → found")
