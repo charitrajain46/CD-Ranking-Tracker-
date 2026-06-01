@@ -701,23 +701,21 @@ def main():
     # ── [5] Checkpoint-based selection ────────────────────────
     print("\n[6/6] Checkpoint selection …")
 
-    # Build ordered Source list (preserving row order, deduped by cid+course_id)
-    src_ordered    = []
-    seen_src_pairs = set()
+    # Build ordered Source list — ONE entry per unique college (first course only).
+    # Batches and sampling operate on colleges, not (college × course) pairs,
+    # so a college with 10 courses still occupies exactly ONE slot in a batch.
+    src_ordered = []
+    seen_cids   = set()
     for row in src_raw[1:]:
         if not any(str(v).strip() for v in row):
             continue
-        record    = {src_header[i]: (row[i] if i < len(row) else "")
-                     for i in range(len(src_header))}
-        cid       = _flex(record, "college_id", "College_Id", "College_ID")
-        course_id = _flex(record, "course_id",  "Course_Id",  "Course_ID")
-        if not cid:
+        record = {src_header[i]: (row[i] if i < len(row) else "")
+                  for i in range(len(src_header))}
+        cid = _flex(record, "college_id", "College_Id", "College_ID")
+        if not cid or cid in seen_cids:
             continue
-        pair = (cid, course_id)
-        if pair in seen_src_pairs:
-            continue
-        seen_src_pairs.add(pair)
-        src_ordered.append((cid, record))
+        seen_cids.add(cid)
+        src_ordered.append((cid, record))   # first course row for this college
 
     total_src = len(src_ordered)
     print(f"  Source ordered pairs : {total_src}")
