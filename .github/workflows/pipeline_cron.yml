@@ -54,7 +54,7 @@ jobs:
           server_port: 465
           username: ${{ secrets.NOTIFY_EMAIL }}
           password: ${{ secrets.NOTIFY_EMAIL_PASSWORD }}
-          to: ${{ secrets.NOTIFY_EMAIL }}, shivang.p@collegedunia.com, charitra.jain@collegedunia.com
+          to: ${{ secrets.NOTIFY_EMAIL }}, shivang.singh@collegedunia.com, charitra.jain@collegedunia.com
           from: Collegedunia Pipeline Bot
           subject: "Pipeline Run ${{ job.status == 'success' && '✅ Succeeded' || '❌ Failed' }} — ${{ github.run_id }}"
           body: |
