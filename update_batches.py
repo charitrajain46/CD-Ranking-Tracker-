@@ -96,30 +96,14 @@ def update_source_batches(sh, subgroup_size: int = SUBGROUP_SIZE):
     if cid_col is None:
         cid_col = 0   # fallback: column A
 
-    # ── Find or create Batch column ───────────────────────────────────────────
-    batch_col = None
-    for i, h in enumerate(header):
-        if h.strip().lower() == "batch":
-            batch_col = i
-            break
-
-    if batch_col is None:
-        # Find the last column that has a non-empty header
-        # Limit to 25 columns max so we never exceed grid bounds (column Z = 26).
-        last_used = 0
-        for i, h in enumerate(header[:25]):   # never scan beyond col Y
-            if str(h).strip():
-                last_used = i
-        batch_col  = min(last_used + 1, 25)   # cap at col Z (index 25)
-        # Expand grid columns if needed before writing
-        if src_ws.col_count <= batch_col:
-            src_ws.resize(cols=batch_col + 1)
-        col_letter = _col_letter(batch_col + 1)
-        src_ws.update([["Batch"]], f"{col_letter}1", value_input_option="USER_ENTERED")
-        print(f"  Created 'Batch' column at column {col_letter}.")
+    # ── Batch column is always column E (index 4) ────────────────────────────
+    batch_col  = 4          # 0-based → column E
+    col_letter = "E"
+    if str(header[batch_col]).strip().lower() != "batch":
+        src_ws.update([["Batch"]], "E1", value_input_option="USER_ENTERED")
+        print(f"  'Batch' header written to column E.")
     else:
-        col_letter = _col_letter(batch_col + 1)
-        print(f"  'Batch' column found at column {col_letter}.")
+        print(f"  'Batch' column found at column E.")
 
     # ── Load Add values from Content sheet ────────────────────────────────────
     add_values = _load_add_values(sh)
