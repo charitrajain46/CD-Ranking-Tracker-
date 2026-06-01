@@ -381,9 +381,10 @@ def _load_email_config(state: dict) -> dict:
     """
     # Hard-coded recipients (same as pipeline_cron.yml)
     FIXED_RECIPIENTS = [
-        "shivang.singh@collegedunia.com",
-        "charitra.jain@collegedunia.com",
-        "anurag.priyadarshan@collegedunia.com",
+        "shivang.p@collegedunia.com",   # testing — add others once confirmed working
+        # "shivang.singh@collegedunia.com",
+        # "charitra.jain@collegedunia.com",
+        # "anurag.priyadarshan@collegedunia.com",
     ]
 
     cfg = {
