@@ -2,30 +2,35 @@
 """
 phase1_populate.py  ─  PHASE 1 : SOURCE  →  INTERMEDIATE + FINAL
 =================================================================
-15-DAY CYCLE:
-  Every college is re-ranked every CYCLE_DAYS (15) days.
-  "Due" = never ranked OR last ranked >= CYCLE_DAYS days ago.
-  Tracked via updated_at column (col H) in Intermediate.
+CHECKPOINT SYSTEM (8 000–8 500 colleges):
 
-SMART SELECTION (replaces random 40%):
-  Due colleges sorted descending by "Add (Search Volume and Traffic)"
-  from the Content sheet.
-  Split into groups of SUBGROUP_SIZE (50).
-  Pick top SAMPLE_RATIO (40%) from each group.
-  Stop when MAX_DAILY_COLLEGES (550) reached.
+  State is stored in a Google Sheets tab (GS_Pipeline_State) so the
+  pipeline works in stateless environments (GitHub Actions).
 
-NEW COLLEGE HANDLING:
-  New colleges are eligible ONLY on the very first run (empty Intermediate).
-  Once colleges exist in Intermediate the tracked set is LOCKED — subsequent
-  runs re-rank those colleges only.  New Source additions are ignored unless
-  you add them manually via Quick Run (college mode).
+  DAILY RUN:
+    1. Load checkpoint_row from GS_Pipeline_State.
+    2. Starting at checkpoint_row in Source, take batches of 50, pick
+       top 40% (= 20) from each batch.
+    3. Of those picked, skip any college ranked < CYCLE_DAYS (15) days ago.
+    4. Continue until 550 due colleges collected OR Source exhausted.
+    5. Advance checkpoint_row past processed rows; save back to GS sheet.
+    6. When checkpoint_row reaches end of Source, it wraps to 0 next run.
 
-DELETION SYNC:
-  Colleges removed from Source are auto-removed from Intermediate + Final.
+  15-DAY CYCLE:
+    updated_at in Intermediate tracks when each college was last ranked.
+    Colleges with updated_at < 15 days ago are skipped (not due yet).
+    When the checkpoint wraps and reaches a college again, 15 days will
+    have passed → it's due again → same colleges repeat every cycle.
 
-AUTO-SCHEDULING:
-  Adds a daily midnight cron job (0 0 * * *) on first run.
-  The pipeline then runs automatically every night at 12:00 AM.
+  NEW COLLEGE HANDLING:
+    When checkpoint reaches a new college (not yet in Intermediate):
+      • Rank it today if total < 550 → added to Intermediate + Final.
+      • If total already 550 → add to Final with "Scheduled: tomorrow",
+        store cid in deferred queue in GS_Pipeline_State, rank first
+        on next run before advancing checkpoint further.
+
+  DELETION SYNC:
+    Colleges removed from Source are auto-removed from Intermediate + Final.
 """
 
 import os, re, sys, json, subprocess, csv
@@ -47,9 +52,10 @@ STATE_FILE         = "pipeline_state.json"
 CSV_FILE           = "Colleges_Short_Form.csv"
 
 MAX_DAILY_COLLEGES = 550    # max college-course pairs ranked per day
-SUBGROUP_SIZE      = 50     # sub-batch size for smart selection
+SUBGROUP_SIZE      = 50     # Source batch size for 40% selection
 SAMPLE_RATIO       = 0.40   # pick top 40% from each sub-batch
 CYCLE_DAYS         = 15     # re-rank every N days
+GS_STATE_SHEET     = "GS_Pipeline_State"  # checkpoint state stored here
 
 # Exit codes
 EXIT_OK            = 0
@@ -317,39 +323,52 @@ def get_last_ranked_dates(data_rows):
 
 
 # ══════════════════════════════════════════════════════════════
-#  SMART SELECTION
+#  GS CHECKPOINT STATE  (stored in Google Sheets)
 # ══════════════════════════════════════════════════════════════
 
-def smart_select(due_list, add_values, max_count):
+def load_gs_state(sh):
     """
-    Select up to max_count items from due_list using the tiered approach:
-      1. Sort all by Add value descending (highest traffic first).
-      2. Split into groups of SUBGROUP_SIZE (50).
-      3. Pick top SAMPLE_RATIO (40%) from each group → ensures coverage
-         across ALL traffic tiers, not just the absolute top colleges.
-      4. Stop when max_count reached.
+    Load checkpoint state from GS_Pipeline_State sheet.
+    Creates the sheet if it doesn't exist.
 
-    due_list  : list of (college_id, source_record_dict)
-    add_values: {college_id: float}  — from Content sheet
-    Returns   : list of (college_id, source_record_dict)
+    State keys:
+      checkpoint_row    : int  — current position in Source (0-indexed data row)
+      cycle_start_date  : str  — ISO date when current cycle started
+      last_run_date     : str  — ISO date of last successful run
+      deferred_new_json : str  — JSON list of [[cid, course_id], ...] deferred new colleges
     """
-    # Sort descending by Add value; unknown colleges get 0 (go to end)
-    ranked = sorted(
-        due_list,
-        key=lambda x: add_values.get(x[0], 0.0),
-        reverse=True,
-    )
+    try:
+        ws = sh.worksheet(GS_STATE_SHEET)
+    except gspread.exceptions.WorksheetNotFound:
+        ws = sh.add_worksheet(title=GS_STATE_SHEET, rows=20, cols=2)
+        ws.update([["key", "value"]], "A1:B1")
+        print(f"  Created new sheet: {GS_STATE_SHEET}")
 
-    selected = []
-    for i in range(0, len(ranked), SUBGROUP_SIZE):
-        group  = ranked[i : i + SUBGROUP_SIZE]
-        n_pick = max(1, round(len(group) * SAMPLE_RATIO))
-        selected.extend(group[:n_pick])
-        if len(selected) >= max_count:
-            selected = selected[:max_count]
-            break
+    rows = ws.get_all_values()
+    state_map = {}
+    for row in rows[1:]:   # skip header
+        if len(row) >= 2 and row[0].strip():
+            state_map[row[0].strip()] = row[1].strip()
 
-    return selected
+    return {
+        "checkpoint_row":    int(state_map.get("checkpoint_row",  "0")),
+        "cycle_start_date":  state_map.get("cycle_start_date",  ""),
+        "last_run_date":     state_map.get("last_run_date",     ""),
+        "deferred_new_json": state_map.get("deferred_new_json", "[]"),
+        "_ws": ws,
+    }
+
+
+def save_gs_state(gs_state):
+    """Write current checkpoint state back to GS_Pipeline_State sheet."""
+    ws = gs_state["_ws"]
+    rows = [["key", "value"]]
+    for k, v in gs_state.items():
+        if k == "_ws":
+            continue
+        rows.append([k, str(v)])
+    ws.update(rows, f"A1:B{len(rows)}")
+    print(f"  ✓ GS state saved (checkpoint={gs_state['checkpoint_row']})")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -656,12 +675,8 @@ def main():
     # Final
     final_all = final_ws.get_all_values() if final_ws else []
 
-    # Content — Add values
-    print("\n[5/6] Loading Add values from Content sheet …")
-    add_values = load_add_values(sh)
-
     # ── [4] Deletion sync ─────────────────────────────────────
-    print("\n[6/6] Syncing deletions, selecting, and updating …")
+    print("\n[5/6] Syncing deletions …")
 
     deleted_cids = inter_cids - all_source_cids
     if deleted_cids:
@@ -674,62 +689,138 @@ def main():
     else:
         print("  No deletions needed.")
 
-    # ── [5] 15-day cycle: determine due colleges ──────────────
-    last_ranked = get_last_ranked_dates(data_rows)
+    # ── [5] Checkpoint-based selection ────────────────────────
+    print("\n[6/6] Checkpoint selection …")
 
-    new_cids  = all_source_cids - inter_cids   # never been in Intermediate
-    due_new   = []   # (cid, record) — brand new colleges
-    due_re    = []   # (cid, record) — existing colleges due for re-rank
-
-    for cid in sorted(all_source_cids):   # sorted for determinism
-        records = all_source_records.get(cid, [])
-        if not records:
+    # Build ordered Source list (preserving row order, deduped by cid+course_id)
+    src_ordered    = []
+    seen_src_pairs = set()
+    for row in src_raw[1:]:
+        if not any(str(v).strip() for v in row):
             continue
-        record = records[0]   # pick first listed course for this college
+        record    = {src_header[i]: (row[i] if i < len(row) else "")
+                     for i in range(len(src_header))}
+        cid       = _flex(record, "college_id", "College_Id", "College_ID")
+        course_id = _flex(record, "course_id",  "Course_Id",  "Course_ID")
+        if not cid:
+            continue
+        pair = (cid, course_id)
+        if pair in seen_src_pairs:
+            continue
+        seen_src_pairs.add(pair)
+        src_ordered.append((cid, record))
 
-        if cid in new_cids:
-            due_new.append((cid, record))
-        elif cid in inter_cids:
-            lr = last_ranked.get(cid)
-            if lr is None or (today - lr).days >= CYCLE_DAYS:
-                due_re.append((cid, record))
+    total_src = len(src_ordered)
+    print(f"  Source ordered pairs : {total_src}")
 
-    print(f"\n  New (never ranked)     : {len(due_new)}")
-    print(f"  Due for re-rank (≥{CYCLE_DAYS}d) : {len(due_re)}")
-    print(f"  Not yet due            : "
-          f"{len(inter_cids) - len(due_re)} colleges (ranked < {CYCLE_DAYS} days ago)")
+    # Load GS checkpoint state
+    gs_state         = load_gs_state(sh)
+    checkpoint_row   = gs_state["checkpoint_row"]
+    cycle_start_date = gs_state["cycle_start_date"] or today.isoformat()
 
-    # ── [6] Smart selection ───────────────────────────────────
-    # LOCK RULE: Once any colleges exist in Intermediate (pipeline has run
-    # before), do NOT auto-add new Source colleges. The tracked set is fixed
-    # to whatever was selected on the first run.
-    # New colleges only enter the pool on the very first run (empty Intermediate).
-    if inter_cids:
-        all_due     = due_re   # subsequent run — locked to existing colleges only
-        new_in_pool = []
-        if due_new:
-            print(f"  {len(due_new)} new Source college(s) exist but are SKIPPED"
-                  f" — pipeline is locked to the initial selection.")
-    else:
-        all_due     = due_new + due_re   # first run — all Source colleges eligible
-        new_in_pool = due_new
+    print(f"  Checkpoint position  : {checkpoint_row} / {total_src}")
 
-    selected = smart_select(all_due, add_values, MAX_DAILY_COLLEGES)
+    # Wrap checkpoint if Source is exhausted
+    if checkpoint_row >= total_src:
+        checkpoint_row   = 0
+        cycle_start_date = today.isoformat()
+        print(f"  Checkpoint wrapped → new cycle started {cycle_start_date}")
+
+    # Load deferred queue (new colleges that couldn't fit in a previous day's 550)
+    try:
+        deferred_pairs = json.loads(gs_state["deferred_new_json"])
+    except (json.JSONDecodeError, TypeError):
+        deferred_pairs = []
+
+    last_ranked  = get_last_ranked_dates(data_rows)
+
+    selected     = []   # (cid, record) to rank today — max 550
+    selected_new = []   # new cids (not yet in Intermediate)
+    selected_re  = []   # existing cids due for re-ranking
+    all_due      = []   # all due candidates encountered (for summary)
+
+    # ── Rank deferred new colleges first ─────────────────────
+    remaining_deferred = []
+    for cid_d, course_id_d in deferred_pairs:
+        # Find record from src_ordered
+        rec_d = None
+        for cid2, rec2 in src_ordered:
+            if cid2 == cid_d:
+                rc2 = _flex(rec2, "course_id", "Course_Id", "Course_ID")
+                if rc2 == course_id_d:
+                    rec_d = rec2
+                    break
+        if rec_d is None:
+            continue   # college removed from Source — skip silently
+
+        all_due.append((cid_d, rec_d))
+        if len(selected) < MAX_DAILY_COLLEGES:
+            selected.append((cid_d, rec_d))
+            selected_new.append(cid_d)
+        else:
+            remaining_deferred.append((cid_d, course_id_d))
+
+    # ── Walk Source from checkpoint, take batches of 50 ──────
+    deferred_new_today = []   # new colleges found but beyond 550 today
+
+    i = checkpoint_row
+    while i < total_src:
+        batch  = src_ordered[i : i + SUBGROUP_SIZE]
+        # If the entire source fits within one day's limit, take every college.
+        # The 40% sampling is only needed for very large datasets (8000+ colleges).
+        if total_src <= MAX_DAILY_COLLEGES:
+            n_pick = len(batch)
+        else:
+            n_pick = max(1, round(len(batch) * SAMPLE_RATIO))
+        picked = batch[:n_pick]
+        i     += len(batch)   # advance checkpoint past full batch
+
+        for cid, record in picked:
+            lr     = last_ranked.get(cid)
+            is_new = cid not in inter_cids
+            is_due = is_new or (lr is None) or ((today - lr).days >= CYCLE_DAYS)
+
+            if not is_due:
+                continue   # ranked recently — wait for 15-day cycle
+
+            all_due.append((cid, record))
+
+            if len(selected) < MAX_DAILY_COLLEGES:
+                selected.append((cid, record))
+                if is_new:
+                    selected_new.append(cid)
+                else:
+                    selected_re.append(cid)
+            else:
+                # Overflow — defer new colleges; existing ones will be picked
+                # again when checkpoint cycles back (~15 days)
+                if is_new:
+                    course_id_r = _flex(record, "course_id", "Course_Id", "Course_ID")
+                    deferred_new_today.append((cid, record))
+                    remaining_deferred.append((cid, course_id_r))
+
+        if len(selected) >= MAX_DAILY_COLLEGES:
+            break   # stop advancing checkpoint when batch is full
+
+    new_cids      = set(selected_new)
     selected_cids = set(cid for cid, _ in selected)
-    selected_new  = [cid for cid in selected_cids if cid in new_cids]
-    selected_re   = [cid for cid in selected_cids if cid in inter_cids]
+    unselected_new = deferred_new_today   # new colleges pushed to tomorrow
 
-    # Unselected new colleges — only meaningful on the first run
-    unselected_new = [(cid, rec) for cid, rec in new_in_pool if cid not in selected_cids]
+    # ── Save updated checkpoint ───────────────────────────────
+    new_checkpoint = i if i < total_src else total_src   # total_src → wraps next run
+    gs_state["checkpoint_row"]    = new_checkpoint
+    gs_state["cycle_start_date"]  = cycle_start_date
+    gs_state["last_run_date"]     = today.isoformat()
+    gs_state["deferred_new_json"] = json.dumps(remaining_deferred)
+    save_gs_state(gs_state)
 
-    print(f"\n  Selected today : {len(selected)} colleges"
-          f"  ({len(selected_new)} new + {len(selected_re)} re-rank)"
-          f"  [max {MAX_DAILY_COLLEGES}]")
-    if unselected_new:
-        print(f"  Not selected   : {len(unselected_new)} colleges"
-              f"  (will be picked in next available run)")
+    print(f"\n  Due colleges found     : {len(all_due)}")
+    print(f"  Selected for ranking   : {len(selected)}"
+          f"  ({len(selected_new)} new + {len(selected_re)} re-rank)")
+    print(f"  Deferred new (tmrw)    : {len(unselected_new)}")
+    print(f"  Checkpoint after run   : {new_checkpoint} / {total_src}")
 
-    # Nothing to do at all?
+    # Nothing to do?
     if not selected:
         now           = datetime.now()
         next_midnight = datetime(now.year, now.month, now.day) + timedelta(days=1)
@@ -863,8 +954,7 @@ def main():
             print(f"  Run {current_run} header added: "
                   f"{col_letter(run_start_col)}–{end_col}")
 
-        # Add Final identity rows ONLY for colleges selected for ranking today.
-        # Unselected colleges are NOT added — Final only grows when a college is ranked.
+        # Add Final identity rows for colleges selected for ranking today
         fresh_final  = final_ws.get_all_values()
         final_pairs  = set(
             (str(r[0]).strip(), str(r[1]).strip())
@@ -904,6 +994,47 @@ def main():
         else:
             print("  Final already up to date — no new rows needed.")
 
+        # ── Add deferred new colleges to Final with Scheduled marker ──
+        if unselected_new:
+            tomorrow_str = (today + timedelta(days=1)).isoformat()
+            fresh_final2 = final_ws.get_all_values()
+            final_pairs2 = set(
+                (str(r[0]).strip(), str(r[1]).strip())
+                for idx, r in enumerate(fresh_final2)
+                if idx > 0 and len(r) >= 2
+            )
+            seen_deferred = set()
+            deferred_rows = []
+
+            for cid_d, rec_d in unselected_new:
+                college_id   = cid_d
+                course_id    = _flex(rec_d, "course_id",    "Course_Id",   "Course_ID")
+                college_name = _flex(rec_d, "college_name", "College_Name")
+                course_name  = _flex(rec_d, "course_name",  "Course_Name")
+                pair_d       = (college_id, course_id)
+
+                if pair_d in final_pairs2 or pair_d in seen_deferred:
+                    continue
+                seen_deferred.add(pair_d)
+
+                if college_id in college_short_forms:
+                    c_short = college_short_forms[college_id]
+                else:
+                    c_short = extract_college_short_fallback(college_name)
+                keyword = f"{c_short} {extract_course_short(course_name)}"
+
+                # Build row: identity + padding up to run_start_col, then scheduled note
+                sched_row  = [college_id, course_id, college_name, course_name, keyword]
+                pad_needed = (run_start_col - 1) - len(sched_row)   # cols before first silo col
+                sched_row += [""] * max(0, pad_needed)
+                sched_row.append(f"Scheduled: {tomorrow_str}")
+                deferred_rows.append(sched_row)
+
+            if deferred_rows:
+                final_ws.append_rows(deferred_rows, value_input_option="USER_ENTERED")
+                print(f"  {len(deferred_rows)} deferred new colleges added to Final "
+                      f"(Scheduled: {tomorrow_str}).")
+
         # Write run_start_col to Source!Z1 for Apps Script
         if src_ws.col_count < 26:
             src_ws.resize(cols=26)
@@ -927,7 +1058,8 @@ def main():
     print(f"  Due pool               : {len(all_due)} colleges")
     print(f"  Selected for ranking   : {len(selected)}"
           f"  ({len(selected_re)} re-rank + {len(selected_new)} new)")
-    print(f"  Not selected today     : {len(unselected_new)} (queued for next run)")
+    print(f"  Deferred to tomorrow   : {len(unselected_new)} (new, queued)")
+    print(f"  Checkpoint             : {new_checkpoint} / {total_src}")
     if no_csv_miss:
         print(f"  CSV short-form misses  : {no_csv_miss}")
     print(f"  Intermediate total rows: {total_inter}")

@@ -324,33 +324,25 @@ def clear_next_batch_in_intermediate(
 
 def main() -> None:
     # ── Step 0: Load state & daily limit ──────────────────────
-    print("\n[0/7] Checking run eligibility …")
+    print("\n[0/5] Checking run eligibility …")
     state = load_state()
     validate_sheet_ids(state)
     check_daily_limit(state)
     print(f"  First run today ({date.today().isoformat()}) — proceeding.")
 
-    # ── Step 1: Determine current batch ───────────────────────
-    print("\n[1/7] Loading pipeline state …")
-    batches = state.get("batches", [])
-    if not batches:
-        print("  ERROR: No batches found. Run phase1_populate.py first.")
-        sys.exit(1)
-
-    current_idx   = state.get("next_batch_to_rank", 0) % len(batches)
-    current_batch = batches[current_idx]
-    batch_num     = current_batch["batch_num"]
-    college_ids   = set(str(c) for c in current_batch["college_ids"])
-    print(f"  Current batch : #{batch_num}  ({len(college_ids)} colleges)")
+    # ── Step 1: Load run info from state (written by phase1) ──
+    print("\n[1/5] Loading pipeline state …")
+    run_number = state.get("run_number", 1)
+    print(f"  Run #{run_number}")
 
     # ── Step 2: Auth ──────────────────────────────────────────
-    print("\n[2/7] Authenticating …")
+    print("\n[2/5] Authenticating …")
     creds = get_credentials()
     gc    = gspread.authorize(creds)
     print("  Authenticated")
 
     # ── Step 3: Open spreadsheet and tabs ────────────────────
-    print("\n[3/7] Opening spreadsheet and tabs …")
+    print("\n[3/5] Opening spreadsheet and tabs …")
     try:
         sh = gc.open_by_key(state["spreadsheet_id"])
         print(f"  Spreadsheet  → '{sh.title}'")
@@ -362,51 +354,67 @@ def main() -> None:
         inter_ws = sh.worksheet("Intermediate")
         print("  Intermediate tab → found")
     except gspread.exceptions.WorksheetNotFound:
-        print("  ERROR: 'Intermediate' tab not found — re-run setup.py.")
+        print("  ERROR: 'Intermediate' tab not found.")
         sys.exit(1)
 
     try:
         master_ws = sh.worksheet("Content")
         print("  Content tab  → found")
     except gspread.exceptions.WorksheetNotFound:
-        print("  ERROR: 'Content' tab not found — re-run setup.py.")
+        print("  ERROR: 'Content' tab not found.")
         sys.exit(1)
 
-    # ── Step 4: Read intermediate for this batch ──────────────
-    print(f"\n[4/7] Reading ranked rows for batch #{batch_num} …")
+    # ── Step 4: Read ALL ranked college_ids from Intermediate ─
+    # No batch concept — checkpoint system: phase1 picks colleges,
+    # Apps Script ranks them, phase2 reads whoever has rank filled in.
+    print("\n[4/5] Reading ranked rows from Intermediate …")
+    all_inter = inter_ws.get_all_values()
+    college_ids: set[str] = set()
+    for i, row in enumerate(all_inter):
+        if i == 0:
+            continue
+        cid  = str(row[INTER_COLLEGE_ID_COL - 1]).strip() if len(row) >= INTER_COLLEGE_ID_COL else ""
+        rank = str(row[INTER_RANK_COL - 1]).strip()       if len(row) >= INTER_RANK_COL       else ""
+        if cid and rank:
+            college_ids.add(cid)
+
+    if not college_ids:
+        print("  No ranked rows found in Intermediate.")
+        print("  Apps Script must run before phase2. Exiting.")
+        sys.exit(0)
+
+    print(f"  Ranked colleges found : {len(college_ids)}")
+
     ranked_rows = read_intermediate_for_batch(inter_ws, college_ids)
     if not ranked_rows:
-        print("  No ranked rows found for this batch yet.")
-        print("  Run Apps Script on the intermediate sheet first, then retry.")
+        print("  No ranked rows returned. Exiting.")
         sys.exit(0)
-    print(f"  Found {len(ranked_rows)} ranked rows")
+    print(f"  Total ranked keyword rows : {len(ranked_rows)}")
 
-    # ── Step 5: Group and write to master ─────────────────────
-    print("\n[5/7] Writing to master sheet …")
-    grouped  = group_by_pair(ranked_rows)
-    date_str = date.today().isoformat()
+    # ── Step 5: Group and write to Content (master) sheet ─────
+    print("\n[5/5] Writing to Content sheet …")
+    grouped     = group_by_pair(ranked_rows)
+    date_str    = date.today().isoformat()
     new_headers = build_column_headers(date_str)
 
     pair_to_row, _, next_col = get_master_index(master_ws)
 
-    # Write new headers in row 1
-    end_col    = next_col + len(new_headers) - 1
-    hdr_range  = f"{col_letter(next_col)}1:{col_letter(end_col)}1"
+    end_col   = next_col + len(new_headers) - 1
+    hdr_range = f"{col_letter(next_col)}1:{col_letter(end_col)}1"
     master_ws.update(hdr_range, [new_headers], value_input_option="USER_ENTERED")
 
-    print(f"  Date stamp   : {date_str}")
-    print(f"  New columns  : {col_letter(next_col)} – {col_letter(end_col)}")
+    print(f"  Date stamp  : {date_str}")
+    print(f"  New columns : {col_letter(next_col)} – {col_letter(end_col)}")
 
     rows_to_append = []
     cell_updates   = []
 
     for (cid, csid), info in grouped.items():
         silo_values = build_silo_values(info["silos"])
-
         if (cid, csid) in pair_to_row:
             master_row = pair_to_row[(cid, csid)]
-            c_range = (f"{col_letter(next_col)}{master_row}:"
-                       f"{col_letter(end_col)}{master_row}")
+            c_range    = (f"{col_letter(next_col)}{master_row}:"
+                          f"{col_letter(end_col)}{master_row}")
             cell_updates.append({"range": c_range, "values": [silo_values]})
         else:
             base_kw    = info["base_keyword"] or f"{info['college_name']} {info['course_name']}"
@@ -416,38 +424,20 @@ def main() -> None:
 
     if cell_updates:
         master_ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
-        print(f"  Updated {len(cell_updates)} existing rows")
+        print(f"  Updated  {len(cell_updates)} existing rows")
     if rows_to_append:
         master_ws.append_rows(rows_to_append, value_input_option="USER_ENTERED")
         print(f"  Appended {len(rows_to_append)} new rows")
-    print(f"  Total pairs  : {len(grouped)}")
-
-    # ── Step 6: Advance batch pointer ─────────────────────────
-    print("\n[6/7] Advancing batch pointer …")
-    current_batch["runs"].append({"date": date_str, "pairs_ranked": len(grouped)})
-    state["batches"][current_idx] = current_batch
-
-    next_idx         = (current_idx + 1) % len(batches)
-    state["next_batch_to_rank"] = next_idx
-    next_batch       = batches[next_idx]
-    next_batch_num   = next_batch["batch_num"]
-    next_college_ids = set(str(c) for c in next_batch["college_ids"])
-    print(f"  Completed #{batch_num} → next batch: #{next_batch_num}")
-
-    # ── Step 7: Clear next batch in intermediate ──────────────
-    print(f"\n[7/7] Clearing F/G/H for batch #{next_batch_num} in intermediate …")
-    cleared = clear_next_batch_in_intermediate(inter_ws, next_college_ids)
-    print(f"  Cleared {cleared} rows")
+    print(f"  Total pairs : {len(grouped)}")
 
     record_run(state)
     save_state(state)
 
     print(f"\n{'─'*60}")
-    print(f"  Batch ranked   : #{batch_num}")
-    print(f"  Pairs written  : {len(grouped)}")
-    print(f"  Date stamp     : {date_str}")
-    print(f"  Next batch     : #{next_batch_num} — cleared in intermediate")
-    print(f"  Spreadsheet    : {sh.url}")
+    print(f"  Run #         : {run_number}")
+    print(f"  Pairs written : {len(grouped)}")
+    print(f"  Date stamp    : {date_str}")
+    print(f"  Spreadsheet   : {sh.url}")
     print(f"{'─'*60}")
     print("\n  Done! Next run available after 12:00 AM tomorrow.")
 
