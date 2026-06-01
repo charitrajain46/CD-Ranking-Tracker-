@@ -386,26 +386,43 @@ def api_run_pipeline():
                 try:
                     item = line_q.get(timeout=30)
                 except _queue.Empty:
-                    yield ": heartbeat\n\n"
+                    try:
+                        yield ": heartbeat\n\n"
+                    except (OSError, BrokenPipeError):
+                        log.info("SSE heartbeat: client disconnected — pipeline keeps running.")
+                        break
                     continue
                 if item is None:
                     break
-                yield sse_event(item)
+                try:
+                    yield sse_event(item)
+                except (OSError, BrokenPipeError):
+                    # Browser tab closed — subprocess keeps running in background.
+                    log.info("SSE write error: client disconnected — pipeline keeps running.")
+                    break
 
             proc.wait()
             log_f.close()
             _procs["pipeline"] = None
 
             if proc.returncode in (0, 2):
-                yield sse_event("", event="done")
+                try:
+                    yield sse_event("", event="done")
+                except (OSError, BrokenPipeError):
+                    pass
             elif proc.returncode in (-15, -9):
-                yield sse_event("⛔ Terminated by user.", event="done")
+                try:
+                    yield sse_event("⛔ Terminated by user.", event="done")
+                except (OSError, BrokenPipeError):
+                    pass
             else:
-                yield sse_event(f"Process exited with code {proc.returncode}", event="error")
+                try:
+                    yield sse_event(f"Process exited with code {proc.returncode}", event="error")
+                except (OSError, BrokenPipeError):
+                    pass
 
-        except GeneratorExit:
-            # Web worker dropped the connection — subprocess keeps running.
-            # Logs continue writing to PIPELINE_LOG.
+        except (GeneratorExit, OSError, BrokenPipeError):
+            # Browser disconnected — subprocess keeps running in background.
             log.info("SSE client disconnected — pipeline subprocess continues in background.")
         finally:
             _running["pipeline"] = False
