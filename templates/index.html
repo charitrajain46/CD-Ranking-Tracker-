@@ -1236,14 +1236,16 @@ function refreshStatus() {
       set('d-qr-sub', 'No active quick run');
     }
 
-    // Lock
+    // Lock — show occupied whenever pipeline OR quickrun is active
     var clrBtn = document.getElementById('clear-lock-btn');
-    if (d.pipeline_locked) {
-      setC('d-lock', '🔒 Locked', 'var(--red)');
-      set('d-lock-sub', 'Since ' + (d.lock_since||'').slice(0,16));
-      clrBtn.style.display = '';
+    var isOccupied = d.pipeline_locked || d.pipeline_running || d.quickrun_running;
+    if (isOccupied) {
+      var lockLabel = d.pipeline_running ? '▶ Running' : d.quickrun_running ? '🚀 Quick Run' : '🔒 Locked';
+      setC('d-lock', lockLabel, 'var(--red)');
+      set('d-lock-sub', d.pipeline_running ? 'Full pipeline active' : d.quickrun_running ? 'Quick run active' : 'Since ' + (d.lock_since||'').slice(0,16));
+      clrBtn.style.display = d.pipeline_locked && !d.pipeline_running ? '' : 'none';
       document.getElementById('sb-lock-status').innerHTML =
-        '<span style="color:var(--red);">🔒 Pipeline locked</span>';
+        '<span style="color:var(--red);">🔒 ' + lockLabel + '</span>';
     } else {
       setC('d-lock', '🔓 Free', 'var(--green)');
       set('d-lock-sub', 'No active lock');
@@ -1258,8 +1260,10 @@ function refreshStatus() {
     pill.style.display = '';
     if (d.pipeline_running) {
       pill.className = 'pill pill-yellow'; ptxt.textContent = 'Pipeline Running';
+      startLogAutoRefresh();
     } else if (d.quickrun_running) {
       pill.className = 'pill pill-blue'; ptxt.textContent = 'Quick Run Active';
+      startLogAutoRefresh();
     } else {
       pill.className = 'pill pill-green'; ptxt.textContent = 'Idle';
     }
@@ -2339,6 +2343,33 @@ function infoRow(label, val) {
 // ── Init ──────────────────────────────────────────────────────────
 refreshStatus();
 setInterval(refreshStatus, 30000);
+
+// Auto-refresh rankings every 20s while pipeline/quickrun is running
+setInterval(function() {
+  if (!_currentStatus) return;
+  if (_currentStatus.pipeline_running || _currentStatus.quickrun_running) {
+    var activePage = document.querySelector('.page.active');
+    if (activePage && activePage.id === 'page-rankings') {
+      loadRankings();
+    }
+  }
+}, 20000);
+
+// Auto-refresh logs every 5s while pipeline/quickrun is running
+var _logAutoInterval = null;
+function startLogAutoRefresh() {
+  if (_logAutoInterval) return;
+  _logAutoInterval = setInterval(function() {
+    var activePage = document.querySelector('.page.active');
+    if (activePage && activePage.id === 'page-logs') {
+      loadLogs();
+    }
+    if (_currentStatus && !_currentStatus.pipeline_running && !_currentStatus.quickrun_running) {
+      clearInterval(_logAutoInterval);
+      _logAutoInterval = null;
+    }
+  }, 5000);
+}
 </script>
 </body>
 </html>
