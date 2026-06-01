@@ -301,6 +301,12 @@ def invoke_apps_script(script_service, script_id: str) -> bool:
 def run_stage2(script_service, script_id: str, inter_ws: gspread.Worksheet) -> bool:
     banner("STAGE 2 — Running Apps Script ranking (via Execution API)")
 
+    # Allow up to 3 consecutive rounds with no progress before giving up.
+    # This tolerates Apps Script calls that get Canceled early (connection drops,
+    # transient errors) without aborting the whole pipeline prematurely.
+    MAX_NO_PROGRESS = 3
+    no_progress_streak = 0
+
     for round_num in range(1, MAX_ROUNDS + 1):
         unranked = count_unranked_rows(inter_ws)
 
@@ -313,7 +319,7 @@ def run_stage2(script_service, script_id: str, inter_ws: gspread.Worksheet) -> b
 
         ok = invoke_apps_script(script_service, script_id)
         if not ok:
-            print("\n  Aborting ranking stage due to error.")
+            print("\n  Aborting ranking stage due to Apps Script API error.")
             return False
 
         print(f"  Apps Script call returned.  Waiting {POLL_PAUSE_SEC}s …")
@@ -327,30 +333,43 @@ def run_stage2(script_service, script_id: str, inter_ws: gspread.Worksheet) -> b
             return True
 
         if unranked_after >= unranked:
-            # The HTTP connection may have dropped (PythonAnywhere 5-min timeout) while
-            # Apps Script was still running asynchronously on Google's servers.
-            # Wait one full Apps Script cycle (6 min) then recheck before giving up.
-            print(f"\n  ⚠ No progress detected yet — waiting 6 min for async Apps Script …")
+            # No progress this round — Apps Script may have been Canceled early
+            # or is still running async. Wait 6 min and recheck.
+            no_progress_streak += 1
+            print(f"\n  ⚠ No progress in round {round_num} "
+                  f"(streak: {no_progress_streak}/{MAX_NO_PROGRESS}). "
+                  f"Waiting 6 min for async completion …")
             time.sleep(360)
+
             unranked_retry = count_unranked_rows(inter_ws)
             print(f"  Retry check: {unranked} → {unranked_retry} unranked rows")
+
             if unranked_retry == 0:
                 print(f"\n  ✓ All rows ranked (Apps Script completed asynchronously)!")
                 return True
+
             if unranked_retry < unranked:
                 print(f"\n  Progress detected after wait — continuing …")
+                no_progress_streak = 0   # reset streak on any progress
                 continue
-            print(f"\n  ✗ Confirmed no progress after retry.")
-            print("  Check Apps Script logs: Extensions → Apps Script → Executions")
-            return False
 
-        # More rows remain — loop will call Apps Script again
+            # Still no progress after wait
+            if no_progress_streak >= MAX_NO_PROGRESS:
+                print(f"\n  ✗ No progress for {MAX_NO_PROGRESS} consecutive rounds.")
+                print("  Check Apps Script logs: Extensions → Apps Script → Executions")
+                return False
+
+            print(f"  Retrying round {round_num + 1} …")
+            continue
+
+        # Progress made — reset streak and loop for next round
+        no_progress_streak = 0
         print(f"  {unranked_after} rows still unranked — starting round {round_num + 1} …")
         time.sleep(3)
 
     print(f"\n  ⚠ Reached maximum rounds ({MAX_ROUNDS}). "
           f"{count_unranked_rows(inter_ws)} rows may still be unranked.")
-    print("  Run 'python run_pipeline.py' again to continue, or run Apps Script manually.")
+    print("  Run 'python run_pipeline.py' again to continue.")
     return False
 
 
