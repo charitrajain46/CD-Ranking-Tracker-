@@ -33,13 +33,33 @@ CHECKPOINT SYSTEM (8 000–8 500 colleges):
     Colleges removed from Source are auto-removed from Intermediate + Final.
 """
 
-import os, re, sys, json, subprocess, csv
+import os, re, sys, json, subprocess, csv, time
 from datetime import date, datetime, timedelta
 
 import gspread
+from gspread.exceptions import APIError
 from google.oauth2.credentials      import Credentials
 from google_auth_oauthlib.flow      import InstalledAppFlow
 from google.auth.transport.requests import Request
+
+
+# ══════════════════════════════════════════════════════════════
+#  RETRY HELPER  (handles Google Sheets 503 / 429 transient errors)
+# ══════════════════════════════════════════════════════════════
+
+def gspread_call(fn, *args, retries=5, **kwargs):
+    """Call a gspread function with automatic retry on transient API errors."""
+    for attempt in range(1, retries + 1):
+        try:
+            return fn(*args, **kwargs)
+        except APIError as e:
+            code = e.response.status_code if hasattr(e, 'response') else 0
+            if code in (429, 500, 502, 503, 504) and attempt < retries:
+                wait = 30 * attempt   # 30s, 60s, 90s, 120s
+                print(f"  ⚠ Google API error {code} (attempt {attempt}/{retries}) — retrying in {wait}s …")
+                time.sleep(wait)
+            else:
+                raise
 
 
 # ══════════════════════════════════════════════════════════════
@@ -407,7 +427,8 @@ def extract_spec(name):
 
 def build_keyword_rows(college_id, course_id, college_name_full, course_name_full,
                        c_short, crs_short, spec):
-    base  = f"{c_short} {crs_short}"
+    base  = " ".join(p for p in [c_short.strip(), crs_short.strip()] if p)
+    base  = " ".join(base.split())   # collapse any internal double-spaces
     blank = ["", "", ""]
     rows  = [
         [college_id, course_id, college_name_full, course_name_full, base]                   + blank,
@@ -962,7 +983,9 @@ def main():
                 c_short = college_short_forms[college_id]
             else:
                 c_short = extract_college_short_fallback(college_name)
-            keyword = f"{c_short} {extract_course_short(course_name)}"
+            _crs_s  = extract_course_short(course_name).strip()
+            keyword = " ".join(p for p in [c_short.strip(), _crs_s] if p)
+            keyword = " ".join(keyword.split())
 
             final_new.append(
                 [college_id, course_id, college_name, course_name, keyword]
@@ -1002,7 +1025,9 @@ def main():
                     c_short = college_short_forms[college_id]
                 else:
                     c_short = extract_college_short_fallback(college_name)
-                keyword = f"{c_short} {extract_course_short(course_name)}"
+                _crs_s  = extract_course_short(course_name).strip()
+                keyword = " ".join(p for p in [c_short.strip(), _crs_s] if p)
+                keyword = " ".join(keyword.split())
 
                 # Build row: identity + padding up to run_start_col, then scheduled note
                 sched_row  = [college_id, course_id, college_name, course_name, keyword]

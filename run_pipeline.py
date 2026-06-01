@@ -188,6 +188,26 @@ def banner(title: str) -> None:
     print(f"{'═'*60}")
 
 
+def col_letter(n: int) -> str:
+    """1-based column number → Excel letter (1→A, 27→AA …)."""
+    result = ""
+    while n > 0:
+        n, r = divmod(n - 1, 26)
+        result = chr(65 + r) + result
+    return result
+
+
+def detect_silo(keyword: str) -> str:
+    """Identify which ranking silo a keyword belongs to."""
+    kw = keyword.strip()
+    if kw.endswith(" Admissions"):   return "Admissions"
+    if kw.endswith(" Fees"):         return "Fees"
+    if kw.endswith(" Placements"):   return "Placements"
+    if kw.endswith(" Scholarships"): return "Scholarships"
+    if kw.endswith(")"):             return "Single_Course"
+    return "Main"
+
+
 def count_unranked_rows(inter_ws: gspread.Worksheet) -> int:
     """
     Count Intermediate rows that have a keyword in column E
@@ -203,6 +223,105 @@ def count_unranked_rows(inter_ws: gspread.Worksheet) -> int:
         if keyword and not rank:
             count += 1
     return count
+
+
+# Offset from run_start_col (1-based) to each silo's rank column
+SILO_OFFSETS = {
+    "Admissions":    0,
+    "Fees":          2,
+    "Placements":    4,
+    "Scholarships":  6,
+    "Main":          8,
+    "Single_Course": 10,
+}
+
+
+def mark_stuck_rows(inter_ws: gspread.Worksheet,
+                    final_ws,
+                    run_start_col: int) -> None:
+    """
+    Write NOT_FOUND to every Intermediate row that has a keyword but no rank,
+    and to the corresponding silo column in the Final sheet for this run.
+    Called only after Apps Script has made no progress for MAX_NO_PROGRESS rounds.
+    """
+    all_vals = inter_ws.get_all_values()
+    stuck = []   # (inter_sheet_row_1based, cid, crs_id, keyword)
+
+    for i, row in enumerate(all_vals):
+        if i == 0:
+            continue
+        keyword = str(row[4]).strip() if len(row) > 4 else ""
+        rank    = str(row[5]).strip() if len(row) > 5 else ""
+        if keyword and not rank:
+            cid    = str(row[0]).strip()
+            crs_id = str(row[1]).strip()
+            stuck.append((i + 1, cid, crs_id, keyword))
+
+    if not stuck:
+        return
+
+    print(f"\n  Marking {len(stuck)} stuck rows as NOT_FOUND …")
+
+    # ── Intermediate: write NOT_FOUND to column F ─────────────────
+    inter_updates = [
+        {"range": f"F{sr}", "values": [["NOT_FOUND"]]}
+        for sr, _, _, _ in stuck
+    ]
+    try:
+        inter_ws.batch_update(inter_updates)
+        print(f"  ✓ {len(inter_updates)} Intermediate rows marked NOT_FOUND.")
+    except Exception as e:
+        print(f"  ⚠ Could not update Intermediate: {e}")
+
+    kws    = [kw for _, _, _, kw in stuck]
+    sample = kws[:10]
+    print(f"  Stuck keywords: {sample}" + (" …" if len(kws) > 10 else ""))
+
+    # ── Final: write NOT_FOUND to current run's silo columns ──────
+    if final_ws is None or run_start_col is None:
+        return
+
+    try:
+        final_all = final_ws.get_all_values()
+    except Exception as e:
+        print(f"  ⚠ Could not read Final sheet: {e}")
+        return
+
+    # (cid, crs_id) → set of silo names that are stuck
+    stuck_silos: dict = {}
+    for _, cid, crs_id, kw in stuck:
+        silo = detect_silo(kw)
+        stuck_silos.setdefault((cid, crs_id), set()).add(silo)
+
+    final_updates = []
+    for i, row in enumerate(final_all):
+        if i == 0:
+            continue
+        cid    = str(row[0]).strip()
+        crs_id = str(row[1]).strip()
+        pair   = (cid, crs_id)
+        if pair not in stuck_silos:
+            continue
+        for silo in stuck_silos[pair]:
+            offset = SILO_OFFSETS.get(silo)
+            if offset is None:
+                continue
+            col_0 = (run_start_col - 1) + offset   # 0-based column index
+            val   = str(row[col_0]).strip() if col_0 < len(row) else ""
+            if not val:   # only fill empty cells
+                final_updates.append(
+                    {"range": f"{col_letter(col_0 + 1)}{i + 1}",
+                     "values": [["NOT_FOUND"]]}
+                )
+
+    if final_updates:
+        try:
+            final_ws.batch_update(final_updates)
+            print(f"  ✓ {len(final_updates)} Final sheet cells marked NOT_FOUND.")
+        except Exception as e:
+            print(f"  ⚠ Could not update Final sheet: {e}")
+    else:
+        print("  No empty Final cells to mark.")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -298,7 +417,8 @@ def invoke_apps_script(script_service, script_id: str) -> bool:
         ka_thread.join(timeout=1)
 
 
-def run_stage2(script_service, script_id: str, inter_ws: gspread.Worksheet) -> bool:
+def run_stage2(script_service, script_id: str, inter_ws: gspread.Worksheet,
+               final_ws=None, run_start_col: int = None) -> bool:
     banner("STAGE 2 — Running Apps Script ranking (via Execution API)")
 
     # Allow up to 3 consecutive rounds with no progress before giving up.
@@ -355,9 +475,13 @@ def run_stage2(script_service, script_id: str, inter_ws: gspread.Worksheet) -> b
 
             # Still no progress after wait
             if no_progress_streak >= MAX_NO_PROGRESS:
-                print(f"\n  ✗ No progress for {MAX_NO_PROGRESS} consecutive rounds.")
-                print("  Check Apps Script logs: Extensions → Apps Script → Executions")
-                return False
+                remaining = count_unranked_rows(inter_ws)
+                print(f"\n  ⚠ No progress for {MAX_NO_PROGRESS} consecutive rounds.")
+                print(f"  {remaining} rows appear permanently stuck — Apps Script cannot")
+                print(f"  rank them (likely empty keywords or no search results).")
+                mark_stuck_rows(inter_ws, final_ws, run_start_col)
+                print(f"  Proceeding to Stage 3 with partial results.")
+                return True   # proceed to Stage 3 — don't throw away the good results
 
             print(f"  Retrying round {round_num + 1} …")
             continue
@@ -367,35 +491,33 @@ def run_stage2(script_service, script_id: str, inter_ws: gspread.Worksheet) -> b
         print(f"  {unranked_after} rows still unranked — starting round {round_num + 1} …")
         time.sleep(3)
 
+    remaining = count_unranked_rows(inter_ws)
     print(f"\n  ⚠ Reached maximum rounds ({MAX_ROUNDS}). "
-          f"{count_unranked_rows(inter_ws)} rows may still be unranked.")
-    print("  Run 'python run_pipeline.py' again to continue.")
-    return False
+          f"{remaining} rows still unranked.")
+    print("  Proceeding to Stage 3 with partial results.")
+    return True   # proceed instead of aborting
 
 
 # ══════════════════════════════════════════════════════════════
 #  FINAL SHEET QUALITY CHECK
 # ══════════════════════════════════════════════════════════════
 
-# Rank columns in Final sheet (0-based from column A):
-#   Col 0-4 → College_Id, Course_Id, College_Name, Course_Name, Keywords
-#   Col 5   → Admissions rank
-#   Col 7   → Fees rank
-#   Col 9   → Placements rank
-#   Col 11  → Scholarships rank
-#   Col 13  → Main rank
-#   Col 15  → Single_Course rank
-RANK_COL_INDICES = [5, 7, 9, 11, 13, 15]
-
-def check_final_sheet(gc, spreadsheet_id: str) -> tuple:
+def check_final_sheet(gc, spreadsheet_id: str, run_number: int = 1) -> tuple:
     """
-    Read the Final sheet and check if all rank columns are populated.
+    Read the Final sheet and check if all rank columns for the current run are populated.
+    NOT_FOUND is treated as a valid filled value (Apps Script tried, no result found).
 
     Returns:
-        ("passed",  summary_string)  — all rows have ranks
-        ("partial", summary_string)  — some rows missing ranks
+        ("passed",  summary_string)  — all rows have ranks (or NOT_FOUND)
+        ("partial", summary_string)  — some rows still missing ranks
         ("failed",  summary_string)  — sheet empty or all ranks missing
     """
+    # Compute 0-based rank column indices for this run
+    # run 1 → [5, 7, 9, 11, 13, 15]
+    # run 2 → [18, 20, 22, 24, 26, 28]  etc.
+    run_start_0idx   = 5 + (run_number - 1) * 13
+    rank_col_indices = [run_start_0idx + i * 2 for i in range(6)]
+
     try:
         sh       = gc.open_by_key(spreadsheet_id)
         final_ws = sh.worksheet("Final")
@@ -414,9 +536,9 @@ def check_final_sheet(gc, spreadsheet_id: str) -> tuple:
 
     for row in data_rows:
         row_missing = False
-        for ci in RANK_COL_INDICES:
+        for ci in rank_col_indices:
             val = str(row[ci]).strip() if ci < len(row) else ""
-            if not val:           # completely empty → rank not fetched
+            if not val:           # empty → rank not yet fetched
                 row_missing = True
                 break
         if row_missing:
@@ -620,14 +742,30 @@ def main():
             print("\nPipeline aborted at Stage 1.")
             sys.exit(1)
 
+        # ── Reload state — phase1 writes run_number during its run ──
+        try:
+            with open(STATE_FILE) as _sf:
+                state = json.load(_sf)
+        except Exception:
+            pass
+        run_number    = state.get("run_number", 1)
+        run_start_col = 5 + (run_number - 1) * 13 + 1
+        print(f"\n  Run #{run_number}  |  Final rank columns start at col {run_start_col}")
+
+        # Open Final sheet so mark_stuck_rows can write NOT_FOUND there
+        try:
+            final_ws_stage2 = sh.worksheet("Final")
+        except gspread.exceptions.WorksheetNotFound:
+            final_ws_stage2 = None
+
         # ── Stage 2 — Run Apps Script ranking ────────────────────
-        ok = run_stage2(script_service, script_id, inter_ws)
+        ok = run_stage2(script_service, script_id, inter_ws,
+                        final_ws=final_ws_stage2, run_start_col=run_start_col)
         if not ok:
-            print("\nRanking stage had issues. Final tab may be partially populated.")
-            print("You can:")
-            print("  • Fix the issue and run  python run_pipeline.py  again")
-            print("  • Or run Apps Script manually from the spreadsheet")
-            print("  • Then run  python phase2_build_master.py  to finish Stage 3")
+            # Only hits here on a real Apps Script API error (HTTP 403, 500, etc.)
+            # Stuck/unranked rows cause run_stage2 to return True (partial), not False.
+            print("\nRanking stage failed due to an Apps Script API error.")
+            print("Check the error above, then run  python run_pipeline.py  again.")
             sys.exit(1)
 
         # ── Stage 3 — Build Content tab ──────────────────────────
@@ -643,7 +781,7 @@ def main():
         elapsed_str = f"{mins}m {secs}s"
 
         print("\nChecking Final sheet quality …")
-        sheet_status, sheet_summary = check_final_sheet(gc, spreadsheet_id)
+        sheet_status, sheet_summary = check_final_sheet(gc, spreadsheet_id, run_number)
         print(f"  Final sheet: {sheet_summary}")
 
         if sheet_status == "passed":
