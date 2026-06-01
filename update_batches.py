@@ -8,13 +8,12 @@ Run once manually to populate batch numbers right now:
 Also called automatically at the start of every full pipeline run and
 every Quick Run — so new colleges always get a batch number immediately.
 
-Batch logic (matches quick_run.py batch selection exactly):
-  - Sort ALL unique colleges by Add value (desc) from Content sheet.
-    Colleges with no Add value get Add = 0 (go to the last batch).
-  - Batch 1 = colleges ranked #1–50 by Add
-  - Batch 2 = colleges ranked #51–100
-  - … and so on.
+Batch logic:
+  - Batch numbers assigned by SOURCE ROW ORDER (no sorting by Add value).
+  - First 50 unique colleges in Source → Batch 1
+  - Next 50 → Batch 2, and so on.
   - Every row in Source for the same college gets the same batch number.
+  - New colleges added to Source get a batch number on next pipeline run.
 """
 
 import os, sys, json
@@ -99,14 +98,12 @@ def update_source_batches(sh, subgroup_size: int = SUBGROUP_SIZE):
     # ── Batch column is always column E (index 4) ────────────────────────────
     batch_col  = 4          # 0-based → column E
     col_letter = "E"
-    if str(header[batch_col]).strip().lower() != "batch":
+    existing_e = header[batch_col].strip().lower() if len(header) > batch_col else ""
+    if existing_e != "batch":
         src_ws.update([["Batch"]], "E1", value_input_option="USER_ENTERED")
-        print(f"  'Batch' header written to column E.")
+        print("  'Batch' header written to column E.")
     else:
-        print(f"  'Batch' column found at column E.")
-
-    # ── Load Add values from Content sheet ────────────────────────────────────
-    add_values = _load_add_values(sh)
+        print("  'Batch' column found at column E.")
 
     # ── Get unique college IDs (preserve first-seen order as tiebreak) ────────
     unique_cids = []
