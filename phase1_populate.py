@@ -725,19 +725,10 @@ def main():
     # Load Add values from Content (used to rank colleges within each batch)
     add_values = load_add_values(sh)
 
-    # Find ---CHECKPOINT--- row in Source
-    cp_idx = find_checkpoint_idx(src_raw)   # 0-based index in src_raw, -1 = not found
-
-    # Build two ordered lists: colleges BEFORE checkpoint (done this cycle)
-    # and colleges AFTER checkpoint (candidates for this run).
-    # Each list has ONE entry per unique college (first-seen Source row order).
-    before_cp = []   # already processed this cycle
-    after_cp  = []   # next to process
-    seen_cids = set()
-
-    for i, row in enumerate(src_raw):
-        if i == 0:
-            continue   # skip header
+    # Build ordered unique college list from Source (skip checkpoint rows)
+    src_ordered = []
+    seen_cids   = set()
+    for row in src_raw[1:]:
         if not any(str(v).strip() for v in row):
             continue
         cid = str(row[cid_col_idx]).strip() if cid_col_idx < len(row) else ""
@@ -746,35 +737,10 @@ def main():
         record = {src_header[j]: (row[j] if j < len(row) else "")
                   for j in range(len(src_header))}
         seen_cids.add(cid)
-        if cp_idx < 0 or i > cp_idx:
-            after_cp.append((cid, record))
-        else:
-            before_cp.append((cid, record))
+        src_ordered.append((cid, record))
 
-    total_src = len(before_cp) + len(after_cp)
-
-    # If no colleges remain after checkpoint → full cycle done, wrap around
-    if not after_cp:
-        after_cp  = before_cp + after_cp   # restart from beginning
-        before_cp = []
-        cp_idx    = -1
-        print(f"  All batches processed — starting new 15-day cycle.")
-
-    # Take ONE batch of SUBGROUP_SIZE colleges from after_cp
-    batch_colleges = after_cp[:SUBGROUP_SIZE]
-    last_processed_cid = batch_colleges[-1][0] if batch_colleges else None
-
-    # Within the batch: sort by Add value DESC, pick top 40%
-    batch_sorted = sorted(batch_colleges,
-                          key=lambda x: add_values.get(x[0], 0.0),
-                          reverse=True)
-    n_pick = max(1, round(len(batch_sorted) * SAMPLE_RATIO))
-    picked = batch_sorted[:n_pick]
-
-    print(f"  Checkpoint position  : {cp_idx} in src_raw  "
-          f"({len(before_cp)} processed, {len(after_cp)} remaining)")
-    print(f"  Batch size           : {len(batch_colleges)} colleges  →  "
-          f"picking top {n_pick} by Add value")
+    total_src = len(src_ordered)
+    print(f"  Source unique colleges : {total_src}")
 
     last_ranked = get_last_ranked_dates(data_rows)
 
@@ -782,34 +748,58 @@ def main():
     selected_new = []
     selected_re  = []
     all_due      = []
+    last_processed_cid = None
 
-    for cid, record in picked:
-        lr     = last_ranked.get(cid)
-        is_new = cid not in inter_cids
-        is_due = is_new or (lr is None) or ((today - lr).days >= CYCLE_DAYS)
+    # Walk ALL batches of 50, pick top 40% by Add value from each batch
+    i = 0
+    while i < total_src:
+        batch  = src_ordered[i : i + SUBGROUP_SIZE]
+        i     += len(batch)
 
-        if not is_due:
-            continue   # ranked recently — skip until 15-day cycle
+        # Sort batch by Add value DESC → pick top 40%
+        batch_sorted = sorted(batch,
+                              key=lambda x: add_values.get(x[0], 0.0),
+                              reverse=True)
+        n_pick = max(1, round(len(batch_sorted) * SAMPLE_RATIO))
+        picked = batch_sorted[:n_pick]
 
-        all_due.append((cid, record))
-        selected.append((cid, record))
-        if is_new:
-            selected_new.append(cid)
-        else:
-            selected_re.append(cid)
+        print(f"  Batch {(i // SUBGROUP_SIZE):>2} : {len(batch)} colleges → "
+              f"picking top {n_pick} by Add value")
+
+        for cid, record in picked:
+            lr     = last_ranked.get(cid)
+            is_new = cid not in inter_cids
+            is_due = is_new or (lr is None) or ((today - lr).days >= CYCLE_DAYS)
+
+            if not is_due:
+                continue
+
+            all_due.append((cid, record))
+            if len(selected) < MAX_DAILY_COLLEGES:
+                selected.append((cid, record))
+                if is_new:
+                    selected_new.append(cid)
+                else:
+                    selected_re.append(cid)
+
+        # Track last college of this batch for checkpoint placement
+        last_processed_cid = batch[-1][0]
+
+        if len(selected) >= MAX_DAILY_COLLEGES:
+            break   # daily limit hit
 
     new_cids       = set(selected_new)
     selected_cids  = set(cid for cid, _ in selected)
-    unselected_new = []   # no overflow with single-batch approach
+    unselected_new = []
 
-    # Write ---CHECKPOINT--- to Source after last college of this batch
+    # Write ---CHECKPOINT--- at end of last processed college's rows in Source
     if last_processed_cid:
         write_source_checkpoint(src_ws, src_raw, last_processed_cid, cid_col_idx)
 
     print(f"\n  Due colleges found     : {len(all_due)}")
     print(f"  Selected for ranking   : {len(selected)}"
           f"  ({len(selected_new)} new + {len(selected_re)} re-rank)")
-    print(f"  Batch end college      : {last_processed_cid}")
+    print(f"  Checkpoint after       : college {last_processed_cid}")
 
     # Nothing to do?
     if not selected:
@@ -1050,7 +1040,7 @@ def main():
     print(f"  Selected for ranking   : {len(selected)}"
           f"  ({len(selected_re)} re-rank + {len(selected_new)} new)")
     print(f"  Deferred to tomorrow   : {len(unselected_new)} (new, queued)")
-    print(f"  Checkpoint             : {new_checkpoint} / {total_src}")
+    print(f"  Checkpoint             : after college {last_processed_cid} ({total_src} / {total_src} processed)")
     if no_csv_miss:
         print(f"  CSV short-form misses  : {no_csv_miss}")
     print(f"  Intermediate total rows: {total_inter}")

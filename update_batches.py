@@ -105,13 +105,15 @@ def update_source_batches(sh, subgroup_size: int = SUBGROUP_SIZE):
 
     if batch_col is None:
         # Find the last column that has a non-empty header
-        # (gspread pads rows to full grid width with empty strings,
-        #  so len(header) is unreliable — use last non-empty position instead)
+        # Limit to 25 columns max so we never exceed grid bounds (column Z = 26).
         last_used = 0
-        for i, h in enumerate(header):
+        for i, h in enumerate(header[:25]):   # never scan beyond col Y
             if str(h).strip():
                 last_used = i
-        batch_col  = last_used + 1          # one column after the last real header
+        batch_col  = min(last_used + 1, 25)   # cap at col Z (index 25)
+        # Expand grid columns if needed before writing
+        if src_ws.col_count <= batch_col:
+            src_ws.resize(cols=batch_col + 1)
         col_letter = _col_letter(batch_col + 1)
         src_ws.update([["Batch"]], f"{col_letter}1", value_input_option="USER_ENTERED")
         print(f"  Created 'Batch' column at column {col_letter}.")
