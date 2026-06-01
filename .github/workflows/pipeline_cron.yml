@@ -66,4 +66,5 @@ jobs:
             🔗 View full run logs:
             https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
-            Check your Google Sheet for the latest ranking results.
+            📊 View ranking results in Google Sheet:
+            https://docs.google.com/spreadsheets/d/1Fv9C6i3EGAwNQnYUDh1n_pJ0FV-UwfFbhUjkhh3UJD8/edit?usp=sharing

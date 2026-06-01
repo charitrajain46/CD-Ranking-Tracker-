@@ -773,12 +773,9 @@ def main():
     i = checkpoint_row
     while i < total_src:
         batch  = src_ordered[i : i + SUBGROUP_SIZE]
-        # If the entire source fits within one day's limit, take every college.
-        # The 40% sampling is only needed for very large datasets (8000+ colleges).
-        if total_src <= MAX_DAILY_COLLEGES:
-            n_pick = len(batch)
-        else:
-            n_pick = max(1, round(len(batch) * SAMPLE_RATIO))
+        # Always apply 40% sampling so each batch of 50 contributes ~20 colleges.
+        # Sampling applies regardless of total source size.
+        n_pick = max(1, round(len(batch) * SAMPLE_RATIO))
         picked = batch[:n_pick]
         i     += len(batch)   # advance checkpoint past full batch
 

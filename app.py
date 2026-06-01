@@ -126,6 +126,7 @@ app = Flask(__name__)
 # ── Runtime state ────────────────────────────────────────────────────────────
 _lock            = threading.Lock()
 _running         = {"pipeline": False, "quickrun": False}
+_procs           = {"pipeline": None,  "quickrun": None}   # live subprocess handles
 _next_auto_run   = ""          # ISO timestamp of next midnight auto-run
 _midnight_timer  = None        # threading.Timer handle
 
@@ -202,7 +203,10 @@ def sse_event(data: str, event: str = "message") -> str:
     return out
 
 
-def stream_subprocess(cmd: list, stdin_data: str = None, cwd: str = None):
+def stream_subprocess(cmd: list, stdin_data: str = None, cwd: str = None,
+                       proc_key: str = None):
+    """Stream a subprocess as SSE events.  If proc_key is given ('pipeline' or
+    'quickrun') the Popen handle is stored in _procs so it can be terminated."""
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
 
@@ -212,6 +216,9 @@ def stream_subprocess(cmd: list, stdin_data: str = None, cwd: str = None):
         stdin=subprocess.PIPE if stdin_data else None,
         cwd=cwd or BASE_DIR, env=env, text=True, bufsize=1,
     )
+
+    if proc_key:
+        _procs[proc_key] = proc
 
     if stdin_data:
         def feed():
@@ -226,8 +233,13 @@ def stream_subprocess(cmd: list, stdin_data: str = None, cwd: str = None):
         yield sse_event(line.rstrip())
 
     proc.wait()
+    if proc_key:
+        _procs[proc_key] = None
+
     if proc.returncode in (0, 2):
         yield sse_event("", event="done")
+    elif proc.returncode == -15:          # SIGTERM — user terminated
+        yield sse_event("⛔ Terminated by user.", event="done")
     else:
         yield sse_event(f"Process exited with code {proc.returncode}", event="error")
 
@@ -315,7 +327,7 @@ def api_run_pipeline():
         try:
             yield sse_event("▶  Starting full pipeline …")
             cmd = [PYTHON_EXE, os.path.join(BASE_DIR, "run_pipeline.py")]
-            yield from stream_subprocess(cmd)
+            yield from stream_subprocess(cmd, proc_key="pipeline")
         finally:
             _running["pipeline"] = False
 
@@ -352,7 +364,7 @@ def api_quick_run():
         try:
             yield sse_event(f"▶  Starting Quick Run ({mode}: {value}) …")
             cmd = [PYTHON_EXE, os.path.join(BASE_DIR, "quick_run.py")]
-            yield from stream_subprocess(cmd, stdin_data=stdin_str)
+            yield from stream_subprocess(cmd, stdin_data=stdin_str, proc_key="quickrun")
         finally:
             _running["quickrun"] = False
 
@@ -376,6 +388,33 @@ def api_clear_lock():
         log.info("Pipeline lock cleared via UI.")
         return jsonify({"message": "Pipeline lock cleared successfully."})
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ROUTES — Terminate
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/terminate", methods=["POST"])
+def api_terminate():
+    """Kill the currently running pipeline or quick run subprocess."""
+    body   = request.get_json(force=True, silent=True) or {}
+    target = body.get("target", "")   # "pipeline" or "quickrun"
+
+    if target not in ("pipeline", "quickrun"):
+        return jsonify({"error": "target must be 'pipeline' or 'quickrun'"}), 400
+
+    proc = _procs.get(target)
+    if proc is None or proc.poll() is not None:
+        return jsonify({"message": "No running process found."})
+
+    try:
+        proc.terminate()   # sends SIGTERM — graceful stop
+        log.info(f"Terminate requested for: {target}")
+        return jsonify({"message": f"⛔ {target.capitalize()} terminated. "
+                                    "Data generated so far is preserved."})
+    except Exception as e:
+        log.warning(f"Terminate error ({target}): {e}")
         return jsonify({"error": str(e)}), 500
 
 

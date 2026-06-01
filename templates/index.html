@@ -631,6 +631,7 @@ hr { border:none; border-top:1px solid var(--border); margin:16px 0; }
     </div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       <button class="btn btn-primary" id="btn-pipeline" onclick="runPipeline()">⚡ Start Full Pipeline</button>
+      <button class="btn btn-danger"  id="btn-terminate-pipeline" onclick="terminate('pipeline')" style="display:none;">🛑 Terminate</button>
       <span id="pipe-lbl" style="font-size:12px;color:var(--muted);"></span>
     </div>
   </div>
@@ -691,7 +692,10 @@ hr { border:none; border-top:1px solid var(--border); margin:16px 0; }
       </div>
       <div class="form-group">
         <label>&nbsp;</label>
-        <button class="btn btn-success" id="btn-qr" onclick="runQuickRun()">🚀 Run Now</button>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-success" id="btn-qr" onclick="runQuickRun()">🚀 Run Now</button>
+          <button class="btn btn-danger"  id="btn-terminate-qr" onclick="terminate('quickrun')" style="display:none;">🛑 Terminate</button>
+        </div>
       </div>
     </div>
 
@@ -1344,6 +1348,7 @@ function stopElapsed() {
 function runPipeline() {
   clearTerm('term-pipeline');
   document.getElementById('btn-pipeline').disabled = true;
+  document.getElementById('btn-terminate-pipeline').style.display = '';
   set('psb-stage', 'Starting…'); set('psb-detail', 'Connecting to pipeline');
   set('pipe-lbl', '');
   _pipelineStart = Date.now();
@@ -1362,6 +1367,7 @@ function runPipeline() {
     es.close(); stopElapsed();
     appendTerm('term-pipeline', '\n✓ Pipeline finished!', 't-ok');
     document.getElementById('btn-pipeline').disabled = false;
+    document.getElementById('btn-terminate-pipeline').style.display = 'none';
     set('psb-stage','Completed'); set('psb-detail','All stages done');
     toast('Pipeline completed successfully!', 'success');
     refreshStatus();
@@ -1370,12 +1376,14 @@ function runPipeline() {
     if (e.data) appendTerm('term-pipeline', e.data, 't-err');
     es.close(); stopElapsed();
     document.getElementById('btn-pipeline').disabled = false;
+    document.getElementById('btn-terminate-pipeline').style.display = 'none';
     set('psb-stage','Finished'); set('psb-detail','Check output above');
     refreshStatus();
   });
   es.onerror = function() {
     if (es.readyState === 2) {
       document.getElementById('btn-pipeline').disabled = false;
+      document.getElementById('btn-terminate-pipeline').style.display = 'none';
       stopElapsed(); refreshStatus();
     }
   };
@@ -1402,6 +1410,7 @@ function runQuickRun() {
 
   clearTerm('term-qr');
   document.getElementById('btn-qr').disabled = true;
+  document.getElementById('btn-terminate-qr').style.display = '';
   document.getElementById('qr-status-bar').style.display = '';
   set('qr-sb-stage', 'Starting'); set('qr-sb-detail', 'Initialising quick run…');
   _qrStart = Date.now();
@@ -1420,6 +1429,7 @@ function runQuickRun() {
       reader.read().then(function(res) {
         if (res.done) {
           document.getElementById('btn-qr').disabled = false;
+          document.getElementById('btn-terminate-qr').style.display = 'none';
           stopElapsed();
           document.getElementById('qr-status-bar').style.display = 'none';
           toast('Quick Run finished!', 'success');
@@ -1448,11 +1458,24 @@ function runQuickRun() {
     read();
   }).catch(function(e) {
     document.getElementById('btn-qr').disabled = false;
+    document.getElementById('btn-terminate-qr').style.display = 'none';
     stopElapsed();
     document.getElementById('qr-status-bar').style.display = 'none';
     toast(e.message, 'error');
     appendTerm('term-qr', 'Error: ' + e.message, 't-err');
   });
+}
+
+// ── Terminate ─────────────────────────────────────────────────────
+function terminate(target) {
+  if (!confirm('Terminate the running ' + target + '?\nData generated so far will be preserved.')) return;
+  fetch('/api/terminate', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ target: target })
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    toast(d.message || d.error, d.error ? 'error' : 'info');
+  }).catch(function(e) { toast('Terminate failed: ' + e.message, 'error'); });
 }
 
 // ── Clear Lock ────────────────────────────────────────────────────
