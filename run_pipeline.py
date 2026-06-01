@@ -355,6 +355,68 @@ def run_stage2(script_service, script_id: str, inter_ws: gspread.Worksheet) -> b
 
 
 # ══════════════════════════════════════════════════════════════
+#  FINAL SHEET QUALITY CHECK
+# ══════════════════════════════════════════════════════════════
+
+# Rank columns in Final sheet (0-based from column A):
+#   Col 0-4 → College_Id, Course_Id, College_Name, Course_Name, Keywords
+#   Col 5   → Admissions rank
+#   Col 7   → Fees rank
+#   Col 9   → Placements rank
+#   Col 11  → Scholarships rank
+#   Col 13  → Main rank
+#   Col 15  → Single_Course rank
+RANK_COL_INDICES = [5, 7, 9, 11, 13, 15]
+
+def check_final_sheet(gc, spreadsheet_id: str) -> tuple:
+    """
+    Read the Final sheet and check if all rank columns are populated.
+
+    Returns:
+        ("passed",  summary_string)  — all rows have ranks
+        ("partial", summary_string)  — some rows missing ranks
+        ("failed",  summary_string)  — sheet empty or all ranks missing
+    """
+    try:
+        sh       = gc.open_by_key(spreadsheet_id)
+        final_ws = sh.worksheet("Final")
+        rows     = final_ws.get_all_values()
+    except Exception as e:
+        return ("failed", f"Could not read Final sheet: {e}")
+
+    data_rows = [r for r in rows[1:] if any(str(v).strip() for v in r)]  # skip header + blanks
+
+    if not data_rows:
+        return ("failed", "Final sheet is empty — no rows written.")
+
+    total     = len(data_rows)
+    complete  = 0
+    missing   = 0
+
+    for row in data_rows:
+        row_missing = False
+        for ci in RANK_COL_INDICES:
+            val = str(row[ci]).strip() if ci < len(row) else ""
+            if not val:           # completely empty → rank not fetched
+                row_missing = True
+                break
+        if row_missing:
+            missing += 1
+        else:
+            complete += 1
+
+    pct = round(complete / total * 100) if total else 0
+    summary = f"{complete}/{total} rows fully ranked ({pct}%)"
+
+    if missing == 0:
+        return ("passed", summary)
+    elif complete > 0:
+        return ("partial", f"{summary} — {missing} rows missing ranks")
+    else:
+        return ("failed", f"{summary} — no ranks populated")
+
+
+# ══════════════════════════════════════════════════════════════
 #  STAGE 3 — PHASE 2 (Intermediate → Content tab)
 # ══════════════════════════════════════════════════════════════
 
@@ -445,9 +507,10 @@ def send_pipeline_email(state: dict, status: str, elapsed_str: str, spreadsheet_
         print("  ⚠ No email recipients configured — skipping notification.")
         return
 
-    icon      = "✅" if status == "success" else ("⏭" if status == "skipped" else "❌")
+    icon      = {"passed": "✅", "skipped": "⏭", "partial": "⚠️"}.get(status, "❌")
     sheet_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit?usp=sharing"
-    subject   = f"Pipeline Run {icon} {status.capitalize()} — {now_ist().strftime('%d-%m-%Y %H:%M IST')}"
+    label     = {"passed": "Passed", "skipped": "Skipped", "partial": "Partial", "failed": "Failed"}.get(status, status.capitalize())
+    subject   = f"Pipeline Run {icon} {label} — {now_ist().strftime('%d-%m-%Y %H:%M IST')}"
     body      = f"""Pipeline run completed.
 
 Status   : {status}
@@ -554,17 +617,30 @@ def main():
             print("\nPipeline aborted at Stage 3.")
             sys.exit(1)
 
-        # ── Done ──────────────────────────────────────────────────
+        # ── Done — check Final sheet quality ─────────────────────
         elapsed = datetime.now() - start_time
         mins    = int(elapsed.total_seconds() // 60)
         secs    = int(elapsed.total_seconds() % 60)
         elapsed_str = f"{mins}m {secs}s"
 
-        banner(f"✓ PIPELINE COMPLETE  (took {elapsed_str})")
-        print(f"  Spreadsheet: https://docs.google.com/spreadsheets/d/{spreadsheet_id}")
-        print(f"  Finished at: {now_ist().strftime('%d-%m-%Y %H:%M IST')}")
+        print("\nChecking Final sheet quality …")
+        sheet_status, sheet_summary = check_final_sheet(gc, spreadsheet_id)
+        print(f"  Final sheet: {sheet_summary}")
+
+        if sheet_status == "passed":
+            banner(f"✓ PIPELINE PASSED  (took {elapsed_str})")
+            final_status = "passed"
+        elif sheet_status == "partial":
+            banner(f"⚠ PIPELINE PARTIAL  (took {elapsed_str})")
+            final_status = "partial"
+        else:
+            banner(f"✗ PIPELINE FAILED — Final sheet incomplete  (took {elapsed_str})")
+            final_status = "failed"
+
+        print(f"  Final sheet : {sheet_summary}")
+        print(f"  Spreadsheet : https://docs.google.com/spreadsheets/d/{spreadsheet_id}")
+        print(f"  Finished at : {now_ist().strftime('%d-%m-%Y %H:%M IST')}")
         print()
-        final_status = "success"
 
     finally:
         # ── Always send email (success / skipped / failed) ────────
