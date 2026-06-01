@@ -631,7 +631,6 @@ hr { border:none; border-top:1px solid var(--border); margin:16px 0; }
     </div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       <button class="btn btn-primary" id="btn-pipeline" onclick="runPipeline()">⚡ Start Full Pipeline</button>
-      <button class="btn btn-danger"  id="btn-terminate-pipeline" onclick="terminate('pipeline')" style="display:none;">🛑 Terminate</button>
       <span id="pipe-lbl" style="font-size:12px;color:var(--muted);"></span>
     </div>
   </div>
@@ -694,7 +693,6 @@ hr { border:none; border-top:1px solid var(--border); margin:16px 0; }
         <label>&nbsp;</label>
         <div style="display:flex;gap:8px;">
           <button class="btn btn-success" id="btn-qr" onclick="runQuickRun()">🚀 Run Now</button>
-          <button class="btn btn-danger"  id="btn-terminate-qr" onclick="terminate('quickrun')" style="display:none;">🛑 Terminate</button>
         </div>
       </div>
     </div>
@@ -877,21 +875,14 @@ hr { border:none; border-top:1px solid var(--border); margin:16px 0; }
       <div class="sec-head-left"><h2>Rankings</h2><p>Live ranking data from Google Sheets</p></div>
     </div>
 
-    <!-- Source selector tabs + view mode toggle -->
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
-      <div class="tab-bar" style="margin-bottom:0;">
-        <button class="tab-btn active" id="rk-tab-pipeline" onclick="switchRankSource('pipeline')">📊 Pipeline Rankings (Final)</button>
-        <button class="tab-btn" id="rk-tab-quickrun" onclick="switchRankSource('quickrun')">🚀 Quick Run Rankings</button>
-      </div>
-      <div style="margin-left:auto;display:flex;gap:6px;align-items:center;">
-        <button class="btn btn-ghost btn-sm active" id="rk-view-table" onclick="switchRankView('table')" style="font-size:12px;">📋 Table</button>
-        <button class="btn btn-ghost btn-sm" id="rk-view-sheet" onclick="switchRankView('sheet')" style="font-size:12px;">📊 Live Sheet</button>
-        <button class="btn btn-ghost btn-sm" id="rk-open-sheet" onclick="openSheetInTab()" style="font-size:12px;" title="Open in Google Sheets">↗ Open</button>
-      </div>
+    <!-- Source selector tabs -->
+    <div class="tab-bar" style="margin-bottom:12px;">
+      <button class="tab-btn active" id="rk-tab-pipeline" onclick="switchRankSource('pipeline')">📊 Pipeline Rankings (Final)</button>
+      <button class="tab-btn" id="rk-tab-quickrun" onclick="switchRankSource('quickrun')">🚀 Quick Run Rankings</button>
     </div>
 
-    <!-- Download bar (only in table view) -->
-    <div class="dl-bar" id="rk-dlbar" style="margin-bottom:12px;">
+    <!-- Download bar -->
+    <div class="dl-bar" style="margin-bottom:12px;">
       <span>Download:</span>
       <button class="btn btn-ghost btn-sm" onclick="downloadCSV()">⬇ CSV</button>
       <button class="btn btn-ghost btn-sm" onclick="downloadRankingsPDF()">⬇ PDF</button>
@@ -902,8 +893,8 @@ hr { border:none; border-top:1px solid var(--border); margin:16px 0; }
     </div>
   </div>
 
-  <!-- TABLE VIEW: Scrollable table area -->
-  <div id="rk-table-view" style="flex:1;overflow:hidden;padding:0 28px 24px;min-height:0;">
+  <!-- Scrollable table area -->
+  <div style="flex:1;overflow:hidden;padding:0 28px 24px;min-height:0;">
     <div style="height:100%;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;display:flex;flex-direction:column;">
 
       <div id="rk-loading" class="loading-row" style="padding:20px 22px;flex-shrink:0;">
@@ -922,27 +913,6 @@ hr { border:none; border-top:1px solid var(--border); margin:16px 0; }
       </div>
 
     </div>
-  </div>
-
-  <!-- LIVE SHEET VIEW: Google Sheets iframe -->
-  <div id="rk-sheet-view" style="display:none;flex:1;padding:0 28px 24px;min-height:0;flex-direction:column;">
-    <!-- Loading indicator while GIDs are fetched -->
-    <div id="rk-sheet-loading" style="padding:20px 0;color:var(--muted);font-size:13px;display:flex;align-items:center;gap:10px;">
-      <span class="spinner"></span> Loading spreadsheet…
-    </div>
-    <!-- iframe notice (if blocked) -->
-    <div id="rk-sheet-blocked" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px;text-align:center;">
-      <div style="font-size:32px;margin-bottom:12px;">🔒</div>
-      <div style="font-weight:600;margin-bottom:8px;">Spreadsheet can't be embedded here</div>
-      <div style="color:var(--muted);font-size:13px;margin-bottom:20px;">Google Sheets blocks embedding for private sheets. Click below to open it in a new tab where you can see live data.</div>
-      <button class="btn btn-primary" onclick="openSheetInTab()">📊 Open Google Sheet in New Tab</button>
-    </div>
-    <!-- The actual iframe -->
-    <iframe id="rk-sheet-iframe"
-      style="display:none;flex:1;width:100%;height:100%;border:1px solid var(--border);border-radius:var(--radius-lg);background:#fff;"
-      frameborder="0"
-      allowfullscreen
-      sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-top-navigation"></iframe>
   </div>
 </div>
 
@@ -1173,12 +1143,13 @@ hr { border:none; border-top:1px solid var(--border); margin:16px 0; }
 <script>
 // ── State ────────────────────────────────────────────────────────
 var _currentStatus    = {};
-var _rankSource       = "pipeline";
-var _reportPeriod     = "daily";
-var _pipelineStart    = null;
-var _qrStart          = null;
-var _elapsedInterval  = null;
-var _charts           = [];
+var _rankSource         = "pipeline";
+var _reportPeriod       = "daily";
+var _pipelineStart      = null;
+var _qrStart            = null;
+var _elapsedInterval    = null;
+var _charts             = [];
+var _termPipelineMarked = false;
 
 // ── Navigation ───────────────────────────────────────────────────
 var pageNames = {
@@ -1300,6 +1271,21 @@ function refreshStatus() {
     set('psb-lastrun', d.phase1_last_run || 'Never');
     if (!d.pipeline_running) {
       set('psb-stage', 'Ready'); set('psb-detail', 'Click Start to begin');
+      // If terminal has output but no "finished" line at the end, append one
+      var term = document.getElementById('term-pipeline');
+      if (term && term.textContent.trim() && !_termPipelineMarked) {
+        _termPipelineMarked = true;
+        var last = term.lastChild;
+        if (!last || !/finished|complete|skipped|terminated/i.test(last.textContent)) {
+          var sp = document.createElement('span');
+          sp.className = 't-ok';
+          sp.textContent = '\n── Pipeline is now idle (run finished or was already complete) ──\n';
+          term.appendChild(sp);
+          term.scrollTop = term.scrollHeight;
+        }
+      }
+    } else {
+      _termPipelineMarked = false;   // reset so we mark again after next run
     }
 
     // Next batch due
@@ -1380,7 +1366,6 @@ function stopElapsed() {
 function runPipeline() {
   clearTerm('term-pipeline');
   document.getElementById('btn-pipeline').disabled = true;
-  document.getElementById('btn-terminate-pipeline').style.display = '';
   set('psb-stage', 'Starting…'); set('psb-detail', 'Connecting to pipeline');
   set('pipe-lbl', '');
   _pipelineStart = Date.now();
@@ -1399,7 +1384,6 @@ function runPipeline() {
     es.close(); stopElapsed();
     appendTerm('term-pipeline', '\n✓ Pipeline finished!', 't-ok');
     document.getElementById('btn-pipeline').disabled = false;
-    document.getElementById('btn-terminate-pipeline').style.display = 'none';
     set('psb-stage','Completed'); set('psb-detail','All stages done');
     toast('Pipeline completed successfully!', 'success');
     refreshStatus();
@@ -1408,15 +1392,13 @@ function runPipeline() {
     if (e.data) appendTerm('term-pipeline', e.data, 't-err');
     es.close(); stopElapsed();
     document.getElementById('btn-pipeline').disabled = false;
-    document.getElementById('btn-terminate-pipeline').style.display = 'none';
     set('psb-stage','Finished'); set('psb-detail','Check output above');
     refreshStatus();
   });
   es.onerror = function() {
     if (es.readyState === 2) {
       document.getElementById('btn-pipeline').disabled = false;
-      document.getElementById('btn-terminate-pipeline').style.display = 'none';
-      stopElapsed(); refreshStatus();
+        stopElapsed(); refreshStatus();
     }
   };
 }
@@ -1442,7 +1424,6 @@ function runQuickRun() {
 
   clearTerm('term-qr');
   document.getElementById('btn-qr').disabled = true;
-  document.getElementById('btn-terminate-qr').style.display = '';
   document.getElementById('qr-status-bar').style.display = '';
   set('qr-sb-stage', 'Starting'); set('qr-sb-detail', 'Initialising quick run…');
   _qrStart = Date.now();
@@ -1461,7 +1442,6 @@ function runQuickRun() {
       reader.read().then(function(res) {
         if (res.done) {
           document.getElementById('btn-qr').disabled = false;
-          document.getElementById('btn-terminate-qr').style.display = 'none';
           stopElapsed();
           document.getElementById('qr-status-bar').style.display = 'none';
           toast('Quick Run finished!', 'success');
@@ -1490,7 +1470,6 @@ function runQuickRun() {
     read();
   }).catch(function(e) {
     document.getElementById('btn-qr').disabled = false;
-    document.getElementById('btn-terminate-qr').style.display = 'none';
     stopElapsed();
     document.getElementById('qr-status-bar').style.display = 'none';
     toast(e.message, 'error');
@@ -1498,17 +1477,6 @@ function runQuickRun() {
   });
 }
 
-// ── Terminate ─────────────────────────────────────────────────────
-function terminate(target) {
-  if (!confirm('Terminate the running ' + target + '?\nData generated so far will be preserved.')) return;
-  fetch('/api/terminate', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ target: target })
-  }).then(function(r) { return r.json(); }).then(function(d) {
-    toast(d.message || d.error, d.error ? 'error' : 'info');
-  }).catch(function(e) { toast('Terminate failed: ' + e.message, 'error'); });
-}
 
 // ── Clear Lock ────────────────────────────────────────────────────
 function clearLock() {
@@ -1520,107 +1488,11 @@ function clearLock() {
 }
 
 // ── Rankings ──────────────────────────────────────────────────────
-var _rankView = 'table';   // 'table' | 'sheet'
-var _sheetGids = null;     // cached { spreadsheet_id, gids: { Final: 123, ... } }
-
 function switchRankSource(src) {
   _rankSource = src;
   document.getElementById('rk-tab-pipeline').className = 'tab-btn' + (src==='pipeline'?' active':'');
   document.getElementById('rk-tab-quickrun').className = 'tab-btn' + (src==='quickrun'?' active':'');
-  if (_rankView === 'sheet') {
-    _loadSheetIframe();
-  } else {
-    loadRankings();
-  }
-}
-
-function switchRankView(view) {
-  _rankView = view;
-  var isSheet = view === 'sheet';
-
-  document.getElementById('rk-view-table').classList.toggle('active', !isSheet);
-  document.getElementById('rk-view-sheet').classList.toggle('active',  isSheet);
-
-  document.getElementById('rk-table-view').style.display  = isSheet ? 'none' : '';
-  document.getElementById('rk-sheet-view').style.display  = isSheet ? 'flex' : 'none';
-  document.getElementById('rk-dlbar').style.display       = isSheet ? 'none' : '';
-
-  if (isSheet) {
-    _loadSheetIframe();
-  }
-}
-
-function _loadSheetIframe() {
-  var loading = document.getElementById('rk-sheet-loading');
-  var blocked = document.getElementById('rk-sheet-blocked');
-  var iframe  = document.getElementById('rk-sheet-iframe');
-  loading.style.display = 'flex'; blocked.style.display = 'none'; iframe.style.display = 'none';
-
-  function _buildAndSetSrc(data) {
-    _sheetGids = data;
-    var sid    = data.spreadsheet_id;
-    var gids   = data.gids || {};
-    var sheetName = _rankSource === 'pipeline' ? 'Final' : 'Quick Run Final';
-    var gid    = gids[sheetName];
-    var src    = 'https://docs.google.com/spreadsheets/d/' + sid + '/htmlview'
-               + (gid !== undefined ? '?gid=' + gid : '');
-
-    loading.style.display = 'none';
-
-    // Try iframe; detect load failure via timeout (Google often blocks with no error event)
-    iframe.onload = function() {
-      // If the iframe loaded something (even an error page), show it
-      iframe.style.display = '';
-      blocked.style.display = 'none';
-    };
-    iframe.onerror = function() {
-      iframe.style.display = 'none';
-      blocked.style.display = '';
-    };
-
-    // Fallback: if no onload fires within 8s, show blocked message
-    var loadTimer = setTimeout(function() {
-      if (iframe.style.display === 'none') {
-        iframe.style.display = 'none';
-        blocked.style.display = '';
-      }
-    }, 8000);
-
-    iframe.onload = function() {
-      clearTimeout(loadTimer);
-      iframe.style.display = '';
-      blocked.style.display = 'none';
-    };
-
-    iframe.src = src;
-  }
-
-  if (_sheetGids) {
-    _buildAndSetSrc(_sheetGids);
-  } else {
-    fetch('/api/sheet-gids').then(r => r.json()).then(function(data) {
-      if (data.error) {
-        loading.style.display = 'none';
-        blocked.style.display = '';
-      } else {
-        _buildAndSetSrc(data);
-      }
-    }).catch(function() {
-      loading.style.display = 'none';
-      blocked.style.display = '';
-    });
-  }
-}
-
-function openSheetInTab() {
-  var sid = (_sheetGids && _sheetGids.spreadsheet_id) || (_currentStatus && _currentStatus.spreadsheet_id) || '';
-  if (!sid) { toast('Spreadsheet ID not found.', 'error'); return; }
-  var gids      = (_sheetGids && _sheetGids.gids) || {};
-  var sheetName = _rankSource === 'pipeline' ? 'Final' : 'Quick Run Final';
-  var gid       = gids[sheetName];
-  var url       = 'https://docs.google.com/spreadsheets/d/' + sid + '/edit'
-                + (gid !== undefined ? '#gid=' + gid : '');
-  window.open(url, '_blank');
+  loadRankings();
 }
 
 function loadRankings() {
@@ -2474,13 +2346,7 @@ setInterval(function() {
   if (_currentStatus.pipeline_running || _currentStatus.quickrun_running) {
     var activePage = document.querySelector('.page.active');
     if (activePage && activePage.id === 'page-rankings') {
-      if (_rankView === 'sheet') {
-        // Reload the iframe src to get fresh data
-        var iframe = document.getElementById('rk-sheet-iframe');
-        if (iframe && iframe.src) { var s = iframe.src; iframe.src = ''; iframe.src = s; }
-      } else {
-        loadRankings();
-      }
+      loadRankings();
     }
   }
 }, 20000);

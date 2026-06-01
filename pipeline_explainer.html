@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Collegedunia Ranking Pipeline — Full Explanation</title>
+<style>
+  :root {
+    --blue:    #2563eb;
+    --indigo:  #4f46e5;
+    --green:   #16a34a;
+    --orange:  #ea580c;
+    --red:     #dc2626;
+    --purple:  #7c3aed;
+    --teal:    #0d9488;
+    --gray:    #64748b;
+    --light:   #f8fafc;
+    --border:  #e2e8f0;
+    --dark:    #0f172a;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: #f1f5f9;
+    color: #1e293b;
+    font-size: 15px;
+    line-height: 1.7;
+  }
+
+  /* ── HERO ── */
+  .hero {
+    background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #1e40af 100%);
+    color: white;
+    padding: 60px 40px 50px;
+    text-align: center;
+  }
+  .hero h1 { font-size: 2.4rem; font-weight: 800; letter-spacing: -0.5px; }
+  .hero p  { font-size: 1.1rem; opacity: 0.75; margin-top: 12px; max-width: 700px; margin-left: auto; margin-right: auto; }
+  .hero-badges { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 24px; }
+  .badge {
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.25);
+    padding: 6px 16px; border-radius: 20px; font-size: 13px; font-weight: 600;
+  }
+
+  /* ── LAYOUT ── */
+  .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+  .section { padding: 48px 0; }
+  .section + .section { border-top: 1px solid var(--border); }
+
+  h2 {
+    font-size: 1.65rem; font-weight: 800; color: var(--dark);
+    margin-bottom: 8px; display: flex; align-items: center; gap: 10px;
+  }
+  h2 .num {
+    background: var(--blue); color: white;
+    width: 32px; height: 32px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 14px; flex-shrink: 0;
+  }
+  h3 { font-size: 1.15rem; font-weight: 700; color: #334155; margin: 24px 0 10px; }
+  p  { color: #475569; margin-bottom: 12px; }
+
+  .subtitle { font-size: 0.95rem; color: var(--gray); margin-bottom: 28px; }
+
+  /* ── CARDS ── */
+  .card {
+    background: white; border-radius: 14px; padding: 28px;
+    border: 1px solid var(--border);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    margin-bottom: 20px;
+  }
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+
+  .card.blue   { border-left: 4px solid var(--blue);   }
+  .card.green  { border-left: 4px solid var(--green);  }
+  .card.orange { border-left: 4px solid var(--orange); }
+  .card.purple { border-left: 4px solid var(--purple); }
+  .card.teal   { border-left: 4px solid var(--teal);   }
+  .card.red    { border-left: 4px solid var(--red);    }
+  .card.indigo { border-left: 4px solid var(--indigo); }
+
+  /* ── PIPELINE FLOW ── */
+  .flow {
+    display: flex; align-items: stretch; gap: 0; flex-wrap: nowrap;
+    overflow-x: auto; padding: 8px 0 16px;
+  }
+  .flow-step {
+    background: white; border: 2px solid var(--border); border-radius: 12px;
+    padding: 20px 18px; min-width: 160px; text-align: center;
+    position: relative; flex: 1;
+  }
+  .flow-step .icon { font-size: 2rem; margin-bottom: 8px; }
+  .flow-step .label { font-weight: 700; font-size: 0.9rem; color: var(--dark); }
+  .flow-step .sub   { font-size: 0.75rem; color: var(--gray); margin-top: 4px; }
+  .flow-arrow {
+    display: flex; align-items: center; justify-content: center;
+    padding: 0 6px; color: var(--blue); font-size: 22px; flex-shrink: 0;
+  }
+
+  .flow-step.s1 { border-color: var(--blue);   }
+  .flow-step.s2 { border-color: var(--orange);  }
+  .flow-step.s3 { border-color: var(--purple);  }
+  .flow-step.s4 { border-color: var(--green);   }
+  .flow-step.s5 { border-color: var(--teal);    }
+
+  /* ── SHEET TABLE ── */
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th { background: #1e3a5f; color: white; padding: 10px 14px; text-align: left; font-weight: 600; }
+  td { padding: 9px 14px; border-bottom: 1px solid #e9ecef; vertical-align: top; }
+  tr:nth-child(even) td { background: #f8fafc; }
+  tr:last-child td { border-bottom: none; }
+
+  .col-tag {
+    display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px;
+    font-weight: 700; margin-right: 4px;
+  }
+  .col-fixed  { background: #dbeafe; color: #1e40af; }
+  .col-rank   { background: #dcfce7; color: #166534; }
+  .col-url    { background: #fef9c3; color: #854d0e; }
+  .col-time   { background: #fce7f3; color: #9d174d; }
+
+  /* ── STAGE BOX ── */
+  .stage {
+    border: 2px solid var(--border); border-radius: 16px; overflow: hidden; margin-bottom: 24px;
+  }
+  .stage-header {
+    padding: 16px 24px; display: flex; align-items: center; gap: 14px;
+  }
+  .stage-num {
+    width: 42px; height: 42px; border-radius: 50%; display: flex; align-items: center;
+    justify-content: center; font-weight: 800; font-size: 18px; color: white; flex-shrink: 0;
+  }
+  .stage-title  { font-size: 1.1rem; font-weight: 800; }
+  .stage-script { font-size: 0.8rem; opacity: 0.75; margin-top: 2px; }
+  .stage-body   { padding: 20px 24px; background: white; }
+
+  .stage.stage1 .stage-header { background: linear-gradient(90deg, #1e40af, #2563eb); color: white; }
+  .stage.stage2 .stage-header { background: linear-gradient(90deg, #9a3412, #ea580c); color: white; }
+  .stage.stage3 .stage-header { background: linear-gradient(90deg, #5b21b6, #7c3aed); color: white; }
+
+  /* ── COMPARE TABLE ── */
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .compare-box { border-radius: 14px; padding: 24px; }
+  .compare-box.yes { background: #f0fdf4; border: 2px solid #86efac; }
+  .compare-box.no  { background: #fff1f2; border: 2px solid #fca5a5; }
+  .compare-box h3  { margin-top: 0; }
+  .compare-box ul  { padding-left: 18px; color: #475569; }
+  .compare-box li  { margin-bottom: 8px; }
+
+  /* ── CYCLE DIAGRAM ── */
+  .cycle-wrap { background: white; border-radius: 16px; padding: 32px; border: 1px solid var(--border); }
+
+  /* ── PROS CONS ── */
+  .proscons { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .pro-box  { background: #f0fdf4; border: 1.5px solid #86efac; border-radius: 12px; padding: 20px; }
+  .con-box  { background: #fff7ed; border: 1.5px solid #fed7aa; border-radius: 12px; padding: 20px; }
+  .pro-box h3, .con-box h3 { margin-top: 0; margin-bottom: 12px; }
+  .pro-box li { color: #166534; margin-bottom: 6px; }
+  .con-box li { color: #9a3412; margin-bottom: 6px; }
+  ul { padding-left: 18px; }
+  li { margin-bottom: 6px; }
+
+  /* ── KEYWORD BOX ── */
+  .kw-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+  .kw {
+    background: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8;
+    padding: 5px 12px; border-radius: 20px; font-size: 13px; font-weight: 500;
+  }
+  .kw.main    { background: #f0fdf4; border-color: #86efac; color: #166534; }
+  .kw.adm     { background: #fff7ed; border-color: #fed7aa; color: #9a3412; }
+  .kw.fees    { background: #fef9c3; border-color: #fde047; color: #854d0e; }
+  .kw.place   { background: #fdf4ff; border-color: #e9d5ff; color: #6b21a8; }
+  .kw.schol   { background: #f0f9ff; border-color: #bae6fd; color: #0369a1; }
+  .kw.sc      { background: #fdf2f8; border-color: #fbcfe8; color: #9d174d; }
+
+  /* ── SHEET VISUAL ── */
+  .sheet-visual { overflow-x: auto; margin: 16px 0; }
+  .sheet-table { border-collapse: collapse; min-width: 700px; font-size: 12px; }
+  .sheet-table th { background: #1a56db; color: white; padding: 7px 12px; border: 1px solid #1e40af; }
+  .sheet-table td { padding: 7px 12px; border: 1px solid #e2e8f0; }
+  .sheet-table tr:nth-child(even) td { background: #f0f4ff; }
+  .cell-green  { background: #d1fae5 !important; font-weight: 600; color: #065f46; }
+  .cell-orange { background: #fed7aa !important; font-weight: 600; color: #92400e; }
+  .cell-blue   { background: #bfdbfe !important; font-weight: 600; color: #1e40af; }
+  .cell-gray   { background: #f1f5f9 !important; color: #64748b; font-style: italic; }
+  .cell-header { background: #f8fafc !important; font-weight: 700; color: #334155; }
+
+  /* ── INFO BOX ── */
+  .info-box {
+    border-radius: 10px; padding: 16px 20px; margin: 16px 0;
+    display: flex; gap: 12px; align-items: flex-start;
+  }
+  .info-box.blue   { background: #eff6ff; border: 1px solid #bfdbfe; }
+  .info-box.yellow { background: #fefce8; border: 1px solid #fde047; }
+  .info-box.red    { background: #fff1f2; border: 1px solid #fca5a5; }
+  .info-box.green  { background: #f0fdf4; border: 1px solid #86efac; }
+  .info-box .icon  { font-size: 1.3rem; flex-shrink: 0; margin-top: 1px; }
+  .info-box .text  { font-size: 0.9rem; color: #1e293b; }
+  .info-box .text strong { display: block; margin-bottom: 3px; }
+
+  /* ── AUTOMATION ── */
+  .auto-chain {
+    display: flex; flex-direction: column; gap: 0;
+    border-left: 3px solid var(--blue); margin: 16px 0 16px 16px; padding-left: 24px;
+  }
+  .auto-step {
+    position: relative; padding: 14px 18px; background: white;
+    border-radius: 10px; border: 1px solid var(--border); margin-bottom: 12px;
+  }
+  .auto-step::before {
+    content: ''; position: absolute; left: -32px; top: 50%;
+    transform: translateY(-50%); width: 12px; height: 12px;
+    background: var(--blue); border-radius: 50%; border: 2px solid white;
+    box-shadow: 0 0 0 2px var(--blue);
+  }
+  .auto-step .label  { font-weight: 700; font-size: 0.9rem; color: var(--dark); }
+  .auto-step .detail { font-size: 0.82rem; color: var(--gray); margin-top: 3px; }
+
+  /* ── FOOTER ── */
+  .footer {
+    background: var(--dark); color: rgba(255,255,255,0.5); text-align: center;
+    padding: 28px; font-size: 0.85rem; margin-top: 40px;
+  }
+
+  @media (max-width: 700px) {
+    .compare, .proscons { grid-template-columns: 1fr; }
+    .flow { flex-direction: column; }
+    .flow-arrow { transform: rotate(90deg); }
+    h2 { font-size: 1.3rem; }
+    .hero h1 { font-size: 1.7rem; }
+  }
+
+  /* ── PRINT ── */
+  @media print {
+    body { background: white; }
+    .hero { background: #1e3a5f !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════ HERO -->
+<div class="hero">
+  <h1>🎓 Collegedunia Article Ranking Pipeline</h1>
+  <p>A complete technical explanation of how the pipeline was built, how it works, how it is deployed, and why it was moved from Vercel to PythonAnywhere — explained from scratch.</p>
+  <div class="hero-badges">
+    <span class="badge">Python</span>
+    <span class="badge">Google Sheets</span>
+    <span class="badge">Google Apps Script</span>
+    <span class="badge">Bright Data SERP API</span>
+    <span class="badge">Flask Dashboard</span>
+    <span class="badge">PythonAnywhere</span>
+    <span class="badge">GitHub Actions</span>
+  </div>
+</div>
+
+
+<div class="container">
+
+<!-- ═══════════════════════════════════════════════════ SECTION 1: WHAT IS THIS -->
+<div class="section">
+  <h2><span class="num">1</span> What Does This Pipeline Do?</h2>
+  <p class="subtitle">Start here if you know nothing about this project.</p>
+
+  <div class="card blue">
+    <h3>The Problem It Solves</h3>
+    <p>Collegedunia has <strong>8,000+ college pages</strong>. Each college page has multiple article sections — Admissions, Fees, Placements, Scholarships, etc. We want to know: <em>for each college article, where does it rank on Google?</em></p>
+    <p>For example: if a user searches <strong>"IIT Bombay B.Tech Fees"</strong>, does the Collegedunia page rank #1 on Google, or is it at position #8? If it's at #8, we need to improve the article.</p>
+    <p>Checking rankings manually for 8,000+ colleges × 5+ keywords = <strong>40,000+ Google searches</strong> — impossible to do by hand. This pipeline automates all of it.</p>
+  </div>
+
+  <div class="card-grid">
+    <div class="card green">
+      <h3>🎯 Input</h3>
+      <p>A Google Sheet with all college names, IDs, course names — the <strong>Source tab</strong>.</p>
+    </div>
+    <div class="card orange">
+      <h3>⚙️ Process</h3>
+      <p>Automatically build search keywords, query Google rankings via Bright Data API, and store results.</p>
+    </div>
+    <div class="card purple">
+      <h3>📊 Output</h3>
+      <p>A Google Sheet showing where each Collegedunia article ranks on Google, updated every 15 days.</p>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════ SECTION 2: ARCHITECTURE -->
+<div class="section">
+  <h2><span class="num">2</span> System Architecture — All Components</h2>
+  <p class="subtitle">Every tool used and how they connect to each other.</p>
+
+  <div class="card">
+    <div class="flow">
+      <div class="flow-step s1">
+        <div class="icon">📋</div>
+        <div class="label">Google Sheets</div>
+        <div class="sub">Source / Intermediate / Final / Content / State</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step s2">
+        <div class="icon">🐍</div>
+        <div class="label">Python Scripts</div>
+        <div class="sub">phase1_populate.py<br>phase2_build_master.py</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step s3">
+        <div class="icon">📜</div>
+        <div class="label">Apps Script</div>
+        <div class="sub">intermediate_apps_script.js<br>checkRanksBatched()</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step s4">
+        <div class="icon">🌐</div>
+        <div class="label">Bright Data API</div>
+        <div class="sub">SERP rank queries<br>via UrlFetchApp</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step s5">
+        <div class="icon">📊</div>
+        <div class="label">Final Sheet</div>
+        <div class="sub">Ranks written back per silo, per run</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card-grid">
+    <div class="card blue">
+      <h3>🖥️ PythonAnywhere (Server)</h3>
+      <p>Hosts the Flask web dashboard and runs the Python pipeline scripts. Acts as the always-on server. URL: <code>charitrajain46.pythonanywhere.com</code></p>
+    </div>
+    <div class="card indigo">
+      <h3>⚡ GitHub Actions (Scheduler)</h3>
+      <p>Triggers the pipeline automatically on a schedule using <code>pipeline_cron.yml</code>. Acts as the alarm clock that wakes up the pipeline.</p>
+    </div>
+    <div class="card teal">
+      <h3>🔑 Google OAuth (Auth)</h3>
+      <p><code>credentials.json</code> + <code>token.json</code> — authenticates Python scripts to read/write Google Sheets. Stored permanently on PythonAnywhere.</p>
+    </div>
+    <div class="card orange">
+      <h3>📡 Bright Data (SERP Data)</h3>
+      <p>A proxy/data service that lets Apps Script query Google Search rankings without getting blocked. Returns where a URL ranks for a given keyword.</p>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════ SECTION 3: GOOGLE SHEETS -->
+<div class="section">
+  <h2><span class="num">3</span> Google Sheets Structure — How Data is Stored</h2>
+  <p class="subtitle">There are 5 tabs inside one Google Spreadsheet. Each has a specific role.</p>
+
+  <!-- SOURCE -->
+  <div class="stage stage1">
+    <div class="stage-header">
+      <div class="stage-num" style="background:rgba(255,255,255,0.25)">S</div>
+      <div><div class="stage-title">Tab 1: SOURCE</div><div class="stage-script">The master list of all colleges to track</div></div>
+    </div>
+    <div class="stage-body">
+      <p>This is the <strong>input tab</strong>. It contains every college–course pair that Collegedunia wants to track. You (or the team) maintain this tab manually — adding or removing colleges here controls what gets ranked.</p>
+      <div class="sheet-visual">
+        <table class="sheet-table">
+          <tr><th>college_id</th><th>course_id</th><th>college_name</th><th>course_name</th><th>... other cols ...</th><th>Z (run_start_col)</th></tr>
+          <tr><td>1001</td><td>201</td><td>Indian Institute of Technology Bombay</td><td>B.Tech Computer Science and Engineering</td><td class="cell-gray">...</td><td class="cell-orange">6</td></tr>
+          <tr><td>1002</td><td>202</td><td>Indian Institute of Technology Delhi</td><td>B.Tech Mechanical Engineering</td><td class="cell-gray">...</td><td class="cell-gray"></td></tr>
+          <tr><td>1003</td><td>203</td><td>Delhi University</td><td>MBA (Management)</td><td class="cell-gray">...</td><td class="cell-gray"></td></tr>
+        </table>
+      </div>
+      <div class="info-box blue">
+        <span class="icon">ℹ️</span>
+        <div class="text"><strong>Column Z (hidden purpose)</strong> Phase 1 writes a number into cell Z1 of this tab to tell Apps Script which column group to write results into. This is how the two systems communicate without a database.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- INTERMEDIATE -->
+  <div class="stage stage2">
+    <div class="stage-header">
+      <div class="stage-num" style="background:rgba(255,255,255,0.25)">I</div>
+      <div><div class="stage-title">Tab 2: INTERMEDIATE</div><div class="stage-script">The working scratchpad — keywords waiting to be ranked</div></div>
+    </div>
+    <div class="stage-body">
+      <p>Phase 1 writes keywords here. Apps Script reads from here, checks Google rankings, and writes results (Rank, URL, timestamp) back into the same rows. This tab is the <strong>bridge between Python and Apps Script</strong>.</p>
+      <div class="sheet-visual">
+        <table class="sheet-table">
+          <tr><th>A: college_id</th><th>B: course_id</th><th>C: college_name</th><th>D: course_name</th><th>E: keyword</th><th>F: Rank</th><th>G: Found URL</th><th>H: updated_at</th></tr>
+          <tr>
+            <td>1001</td><td>201</td><td>IIT Bombay</td><td>B.Tech CSE</td>
+            <td>IIT Bombay B.Tech CSE</td>
+            <td class="cell-gray">— empty —</td><td class="cell-gray">— empty —</td><td class="cell-gray">— empty —</td>
+          </tr>
+          <tr>
+            <td>1001</td><td>201</td><td>IIT Bombay</td><td>B.Tech CSE</td>
+            <td>IIT Bombay B.Tech CSE Admissions</td>
+            <td class="cell-gray">— empty —</td><td class="cell-gray">— empty —</td><td class="cell-gray">— empty —</td>
+          </tr>
+          <tr>
+            <td>1001</td><td>201</td><td>IIT Bombay</td><td>B.Tech CSE</td>
+            <td>IIT Bombay B.Tech CSE Fees</td>
+            <td class="cell-green">3</td><td class="cell-orange">collegedunia.com/...</td><td class="cell-blue">2026-05-30 14:22</td>
+          </tr>
+        </table>
+      </div>
+      <p style="margin-top:12px;"><strong>After Apps Script runs:</strong> columns F, G, H get filled in. Phase 2 reads these filled rows and writes them to the Final/Content tab.</p>
+    </div>
+  </div>
+
+  <!-- FINAL -->
+  <div class="stage stage3">
+    <div class="stage-header">
+      <div class="stage-num" style="background:rgba(255,255,255,0.25)">F</div>
+      <div><div class="stage-title">Tab 3: FINAL</div><div class="stage-script">Per-run ranking results, growing rightward over time</div></div>
+    </div>
+    <div class="stage-body">
+      <p>This tab stores results. Every 15-day run adds <strong>13 new columns</strong> to the right. This lets you compare rankings over time — Run 1 vs Run 2 vs Run 3.</p>
+      <div class="sheet-visual">
+        <table class="sheet-table">
+          <tr>
+            <th>A: College_Id</th><th>B: Course_Id</th><th>C: College_Name</th><th>D: Course_Name</th><th>E: Keywords</th>
+            <th style="background:#065f46">F: Admissions [Run1]</th><th style="background:#065f46">G: Adm_URL</th>
+            <th style="background:#065f46">H: Fees</th><th style="background:#065f46">... +11 cols ...</th>
+            <th style="background:#1e40af">S: Admissions [Run2]</th><th style="background:#1e40af">... +12 cols ...</th>
+          </tr>
+          <tr>
+            <td>1001</td><td>201</td><td>IIT Bombay</td><td>B.Tech CSE</td><td>IIT Bombay B.Tech CSE</td>
+            <td class="cell-green">2</td><td class="cell-orange">cd.com/iit-b...</td>
+            <td class="cell-green">4</td><td class="cell-gray">...</td>
+            <td class="cell-blue">1</td><td class="cell-gray">...</td>
+          </tr>
+          <tr>
+            <td>1002</td><td>202</td><td>IIT Delhi</td><td>B.Tech Mech</td><td>IIT Delhi B.Tech Mech</td>
+            <td class="cell-green">7</td><td class="cell-orange">cd.com/iit-d...</td>
+            <td class="cell-green">3</td><td class="cell-gray">...</td>
+            <td class="cell-blue">5</td><td class="cell-gray">...</td>
+          </tr>
+        </table>
+      </div>
+      <div class="info-box green">
+        <span class="icon">💡</span>
+        <div class="text"><strong>13 columns per run</strong> = 6 silo ranks + 6 silo URLs + 1 Updated_at timestamp. After 10 runs, the sheet has 5 + (10 × 13) = 135 columns.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CONTENT & STATE -->
+  <div class="card-grid">
+    <div class="card teal">
+      <h3>Tab 4: Content</h3>
+      <p>Historical master sheet used by Phase 2 to store aggregated ranking data over time. Also contains <strong>Add/Search Volume</strong> column used by Phase 1 to prioritize which colleges get ranked first (higher traffic = higher priority).</p>
+    </div>
+    <div class="card purple">
+      <h3>Tab 5: GS_Pipeline_State</h3>
+      <p>Stores the pipeline's checkpoint so it works across stateless environments like GitHub Actions. Contains: <code>checkpoint_row</code> (where we are in Source), <code>last_run_date</code>, <code>cycle_start_date</code>, and <code>deferred_new_json</code> (colleges queued for next day).</p>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════ SECTION 4: PIPELINE STAGES -->
+<div class="section">
+  <h2><span class="num">4</span> The 3 Pipeline Stages — Step by Step</h2>
+  <p class="subtitle">When you run <code>python run_pipeline.py</code>, it executes 3 stages in sequence.</p>
+
+  <!-- STAGE 1 -->
+  <div class="stage stage1" style="margin-bottom:24px;">
+    <div class="stage-header">
+      <div class="stage-num">1</div>
+      <div>
+        <div class="stage-title">Stage 1 — phase1_populate.py</div>
+        <div class="stage-script">Source tab → Intermediate tab (prepares keywords for ranking)</div>
+      </div>
+    </div>
+    <div class="stage-body">
+      <p>This script decides <strong>which colleges to rank today</strong> and builds search keywords for each one. Here is exactly what it does, step by step:</p>
+
+      <h3>Step A — Load the checkpoint</h3>
+      <p>It reads <code>GS_Pipeline_State</code> tab to find out where in the Source list it left off last time (<code>checkpoint_row</code>). This is like a bookmark — so it doesn't start from the top every day.</p>
+
+      <h3>Step B — Select colleges using 40% batch sampling</h3>
+      <p>It takes 50 colleges at a time from Source (starting at the checkpoint). From each group of 50, it picks the <strong>top 40% = 20 colleges</strong>. It prefers colleges with higher search traffic (from the Content tab). It keeps picking until it has <strong>550 colleges</strong> for today, or runs out of Source rows.</p>
+
+      <h3>Step C — Skip colleges ranked recently (15-day cycle)</h3>
+      <p>If a college was already ranked within the last 15 days, it is <strong>skipped</strong>. There is no point checking its ranking again so soon.</p>
+
+      <h3>Step D — Build keywords for each selected college</h3>
+      <p>For each college, it creates <strong>5–6 search keywords</strong> based on a short name (from <code>Colleges_Short_Form.csv</code>) and course name:</p>
+
+      <div class="kw-list">
+        <span class="kw main">IIT Bombay B.Tech CSE</span>
+        <span class="kw adm">IIT Bombay B.Tech CSE Admissions</span>
+        <span class="kw fees">IIT Bombay B.Tech CSE Fees</span>
+        <span class="kw place">IIT Bombay B.Tech CSE Placements</span>
+        <span class="kw schol">IIT Bombay B.Tech CSE Scholarships</span>
+        <span class="kw sc">IIT Bombay B.Tech CSE (Computer Science)</span>
+      </div>
+
+      <p>Each keyword maps to one article "silo" on Collegedunia — Main page, Admissions article, Fees article, etc.</p>
+
+      <h3>Step E — Write to Intermediate tab</h3>
+      <p>All keywords are appended as rows in the Intermediate tab (columns A–E). Columns F, G, H are left <strong>blank</strong> — Apps Script will fill those in during Stage 2.</p>
+
+      <h3>Step F — Update Final tab identity rows</h3>
+      <p>Each selected college gets an identity row in the Final tab (columns A–E). The 13 result columns for this run are added as blank headers, ready for Stage 3 to fill in.</p>
+
+      <h3>Step G — Save checkpoint + write run_start_col to Source!Z1</h3>
+      <p>The new checkpoint position is saved back to the <code>GS_Pipeline_State</code> sheet. The current run's starting column number is written to Source!Z1 so Apps Script knows where to write results.</p>
+
+      <div class="info-box yellow">
+        <span class="icon">⚠️</span>
+        <div class="text"><strong>Daily guard:</strong> Phase 1 only runs once per calendar day. If it already ran today, it exits immediately (exit code 2) and the pipeline stops gracefully.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STAGE 2 -->
+  <div class="stage stage2" style="margin-bottom:24px;">
+    <div class="stage-header">
+      <div class="stage-num">2</div>
+      <div>
+        <div class="stage-title">Stage 2 — Apps Script (intermediate_apps_script.js)</div>
+        <div class="stage-script">Intermediate tab → Google SERP rankings via Bright Data API</div>
+      </div>
+    </div>
+    <div class="stage-body">
+      <p>This is where the actual <strong>Google ranking check</strong> happens. The Python script calls <code>checkRanksBatched()</code> inside Google Apps Script via the Apps Script Execution API.</p>
+
+      <h3>Why Apps Script for this step?</h3>
+      <p>Google Apps Script runs <em>inside Google's infrastructure</em> and can read/write Google Sheets directly without API quotas. It also supports <code>UrlFetchApp</code> to call Bright Data. Running this from Python would require far more API calls and authentication complexity.</p>
+
+      <h3>What checkRanksBatched() does:</h3>
+      <p>1. Opens the Intermediate sheet and finds all rows where <strong>column E (keyword) has a value but column F (Rank) is empty</strong> — these are unranked rows.</p>
+      <p>2. Takes them in batches of <strong>10 at a time</strong> and calls the <strong>Bright Data SERP API</strong> simultaneously (using <code>UrlFetchApp.fetchAll</code> for parallelism).</p>
+      <p>3. For each keyword, Bright Data returns the top 50 Google search results. The script scans them to find any URL containing <code>collegedunia.com</code> and records its <strong>position number</strong> (rank).</p>
+      <p>4. It writes the rank, the found URL, and a timestamp into columns F, G, H of that row in Intermediate.</p>
+      <p>5. Apps Script has a <strong>6-minute execution limit</strong>. After 5.5 minutes it stops — even if rows remain. Python then calls it again in a new round.</p>
+
+      <h3>How Python manages the rounds:</h3>
+      <p>Python calls Apps Script, waits 15 seconds, then counts unranked rows. If rows remain, it calls Apps Script again. This repeats up to <strong>70 rounds</strong> (~7 hours total if needed for 40,000+ rows). Each round covers ~200–500 keywords.</p>
+
+      <div class="info-box blue">
+        <span class="icon">🔄</span>
+        <div class="text"><strong>Parallel fetching:</strong> By firing 10 keywords simultaneously per <code>fetchAll</code> call, Stage 2 is ~10× faster than sequential. 550 colleges × 5 keywords = 2,750 keywords → ~6 rounds (~35 minutes).</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STAGE 3 -->
+  <div class="stage stage3" style="margin-bottom:24px;">
+    <div class="stage-header">
+      <div class="stage-num">3</div>
+      <div>
+        <div class="stage-title">Stage 3 — phase2_build_master.py</div>
+        <div class="stage-script">Intermediate tab → Final / Content tab (stores results permanently)</div>
+      </div>
+    </div>
+    <div class="stage-body">
+      <p>Once all keywords are ranked in Stage 2, Phase 2 reads the ranked Intermediate rows and writes results permanently into the <strong>Final</strong> and <strong>Content</strong> tabs.</p>
+
+      <h3>What it does:</h3>
+      <p>1. Reads all ranked rows from Intermediate (rows that now have values in columns F, G, H).</p>
+      <p>2. Groups them by college–course pair. Each pair has up to 6 silos (Admissions, Fees, Placements, Scholarships, Main, Single_Course).</p>
+      <p>3. Writes a <strong>date-stamped column group</strong> (13 columns) into the Final tab for the current run. Each silo gets its rank + URL + timestamp.</p>
+      <p>4. The silo type is detected automatically from the keyword suffix — <em>"IIT Bombay B.Tech CSE Fees"</em> → Fees silo, <em>"IIT Bombay B.Tech CSE Admissions"</em> → Admissions silo, etc.</p>
+
+      <div class="info-box green">
+        <span class="icon">✅</span>
+        <div class="text"><strong>After Stage 3:</strong> The pipeline is complete. The Final tab now has a new set of 13 columns showing today's ranks for all processed colleges. The pipeline exits successfully.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════ SECTION 5: 15-DAY CYCLE -->
+<div class="section">
+  <h2><span class="num">5</span> The 15-Day Cycle — How Rotation Works</h2>
+  <p class="subtitle">The pipeline doesn't re-rank the same colleges every day — it rotates through all 8,000+ colleges over 15 days.</p>
+
+  <div class="cycle-wrap">
+    <h3>The Problem with 8,000 Colleges</h3>
+    <p>You can't rank 8,000 colleges every day — that would be 40,000+ API calls daily. Instead, the pipeline takes <strong>550 colleges per day</strong> and spreads all 8,000 across ~15 days. Each college gets re-ranked once every 15 days, which is frequent enough to detect ranking changes.</p>
+
+    <h3>How the Checkpoint Works</h3>
+    <p>Think of Source as a circular queue. The pipeline keeps a <code>checkpoint_row</code> that remembers its position in Source:</p>
+
+    <div class="auto-chain">
+      <div class="auto-step">
+        <div class="label">Day 1 — Run 1</div>
+        <div class="detail">Starts at row 0. Takes batches of 50, picks top 40% (=20). Collects 550 colleges. Saves checkpoint at row ~1,375. These 550 colleges are ranked today.</div>
+      </div>
+      <div class="auto-step">
+        <div class="label">Day 2 — Run 1 continues</div>
+        <div class="detail">Resumes from row 1,375. Picks next 550 colleges. They haven't been ranked yet (or were ranked >15 days ago), so they're due.</div>
+      </div>
+      <div class="auto-step">
+        <div class="label">Days 3–14 — Middle of cycle</div>
+        <div class="detail">Pipeline runs daily. Each run advances the checkpoint further through Source. Colleges already ranked recently are skipped.</div>
+      </div>
+      <div class="auto-step">
+        <div class="label">Day 15 — Checkpoint wraps</div>
+        <div class="detail">Checkpoint reaches the end of Source (~8,000 rows), wraps back to 0. A new 15-day cycle begins. Day 1 colleges are now 15 days old → due for re-ranking.</div>
+      </div>
+    </div>
+
+    <div class="info-box yellow">
+      <span class="icon">⚠️</span>
+      <div class="text"><strong>15-day skip rule:</strong> If a college was ranked less than 15 days ago, it is skipped even if the checkpoint reaches it. This prevents double-ranking and ensures each college is ranked exactly once per cycle.</div>
+    </div>
+
+    <h3>New College Handling</h3>
+    <p>When a college is added to the Source tab for the first time: it is ranked the next time the checkpoint reaches its row. If the day's 550-college limit is already full, it is added to a <strong>deferred queue</strong> in <code>GS_Pipeline_State</code> and ranked the next day as a priority.</p>
+
+    <h3>Deletion Sync</h3>
+    <p>If a college is removed from the Source tab, Phase 1 automatically removes all its rows from the Intermediate and Final tabs too. This keeps all three tabs in sync.</p>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════ SECTION 6: DEPLOYMENT -->
+<div class="section">
+  <h2><span class="num">6</span> Deployment Stack — How It's Hosted</h2>
+  <p class="subtitle">The pipeline runs on PythonAnywhere, triggered by GitHub Actions.</p>
+
+  <div class="card-grid">
+    <div class="card green">
+      <h3>🐍 PythonAnywhere (The Server)</h3>
+      <p><strong>Role:</strong> Runs all Python code and hosts the Flask dashboard.</p>
+      <p><strong>Why:</strong> It's an always-on Linux server with a persistent filesystem. The pipeline can run for hours, store files like <code>token.json</code> permanently, and serve the web dashboard 24/7.</p>
+      <p><strong>URL:</strong> <code>charitrajain46.pythonanywhere.com</code></p>
+      <p><strong>Files stored:</strong> <code>credentials.json</code>, <code>token.json</code>, <code>pipeline_state.json</code>, all Python scripts, <code>pipeline.log</code></p>
+    </div>
+    <div class="card indigo">
+      <h3>⚡ GitHub Actions (The Scheduler)</h3>
+      <p><strong>Role:</strong> Triggers the pipeline automatically on a schedule.</p>
+      <p><strong>How:</strong> The <code>pipeline_cron.yml</code> workflow file defines a cron schedule. When it fires, it sends an HTTP request to PythonAnywhere to start <code>run_pipeline.py</code>.</p>
+      <p><strong>File:</strong> <code>.github/workflows/pipeline_cron.yml</code></p>
+      <p><strong>Trigger:</strong> "Run Pipeline Every 15 Days" — manually or scheduled.</p>
+    </div>
+  </div>
+
+  <div class="auto-chain" style="margin-top:24px;">
+    <div class="auto-step">
+      <div class="label">GitHub Actions cron fires</div>
+      <div class="detail">At the scheduled time, GitHub runs the <code>pipeline_cron.yml</code> workflow. This is free and requires no server of its own.</div>
+    </div>
+    <div class="auto-step">
+      <div class="label">Workflow calls PythonAnywhere API / runs command</div>
+      <div class="detail">The workflow triggers <code>python run_pipeline.py</code> on PythonAnywhere via a task or webhook endpoint. The pipeline starts running on the server.</div>
+    </div>
+    <div class="auto-step">
+      <div class="label">PythonAnywhere executes all 3 stages</div>
+      <div class="detail">Stage 1 (Phase 1) → Stage 2 (Apps Script loops) → Stage 3 (Phase 2). Total runtime: 30 minutes to several hours depending on how many colleges are due.</div>
+    </div>
+    <div class="auto-step">
+      <div class="label">Results written to Google Sheets</div>
+      <div class="detail">Final tab gets a new 13-column group. Content tab is updated. Pipeline logs everything to <code>pipeline.log</code>. Dashboard shows "Idle" status when done.</div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════ SECTION 7: VERCEL vs PYTHONANYWHERE -->
+<div class="section">
+  <h2><span class="num">7</span> Why Vercel Failed — Why PythonAnywhere Works</h2>
+  <p class="subtitle">This is one of the most important technical decisions in this project.</p>
+
+  <div class="compare">
+    <div class="compare-box no">
+      <h3>❌ Vercel — Why It Didn't Work</h3>
+      <ul>
+        <li><strong>Serverless functions have a hard timeout.</strong> Vercel functions run for max 10–60 seconds (depending on plan). The pipeline needs to run for 30 minutes to several hours. It would get killed halfway through.</li>
+        <li><strong>No persistent filesystem.</strong> Vercel functions are stateless. Files like <code>token.json</code> and <code>credentials.json</code> cannot be stored permanently — they disappear after each function execution. Every run would need fresh OAuth login, which requires a browser.</li>
+        <li><strong>Can't manage long-running processes.</strong> The Apps Script loop (up to 70 rounds, 5.5 min each) is a long-running process. Vercel cannot keep a function alive for that long.</li>
+        <li><strong>No cron for long tasks.</strong> Vercel Cron Jobs also run as serverless functions — same 10–60 second limit.</li>
+        <li><strong>No SSH or manual intervention.</strong> If something breaks, you can't SSH into Vercel to inspect files, re-authenticate, or debug.</li>
+        <li><strong>Memory limits.</strong> Loading 8,000 rows of spreadsheet data into memory may exceed Vercel's function memory cap.</li>
+      </ul>
+    </div>
+    <div class="compare-box yes">
+      <h3>✅ PythonAnywhere — Why It Works</h3>
+      <ul>
+        <li><strong>Always-on Linux server.</strong> Processes can run for hours. No timeout for background scripts.</li>
+        <li><strong>Persistent filesystem.</strong> <code>token.json</code>, <code>credentials.json</code>, <code>pipeline_state.json</code>, log files — all stored permanently on disk. OAuth tokens survive across runs.</li>
+        <li><strong>Full Python environment.</strong> Install any library (<code>gspread</code>, <code>flask</code>, <code>google-auth</code>, etc.) once and it stays installed.</li>
+        <li><strong>SSH access.</strong> You can log in via SSH or the in-browser console to debug, re-authenticate, or manually trigger runs.</li>
+        <li><strong>Flask web app support.</strong> The dashboard (<code>app.py</code>) runs as a proper web server, not just a serverless function.</li>
+        <li><strong>Background tasks.</strong> PythonAnywhere supports long-running background scripts through Scheduled Tasks or Always-On tasks.</li>
+        <li><strong>Free tier is sufficient.</strong> For this pipeline's needs, the PythonAnywhere free/basic tier provides enough compute time and storage.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="info-box blue" style="margin-top:20px;">
+    <span class="icon">📌</span>
+    <div class="text"><strong>The core principle:</strong> Vercel is designed for web apps and APIs that respond in milliseconds. This pipeline is a <em>batch processing job</em> that runs for hours. These are fundamentally different use cases. PythonAnywhere is essentially a VPS (virtual private server) that is always running — the correct tool for this job.</div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════ SECTION 8: DASHBOARD -->
+<div class="section">
+  <h2><span class="num">8</span> The Flask Dashboard — app.py</h2>
+  <p class="subtitle">The web UI you see at charitrajain46.pythonanywhere.com</p>
+
+  <div class="card">
+    <p>The dashboard is a <strong>Flask web application</strong> that provides a visual interface to monitor and control the pipeline. It runs permanently on PythonAnywhere as a web service.</p>
+
+    <div class="card-grid" style="margin-top:16px;">
+      <div class="card blue" style="margin-bottom:0;">
+        <h3>📊 Dashboard Page</h3>
+        <p>Shows pipeline status (Idle/Running), last run date, run number, next auto-run countdown, lock status, and a link to open the Google Spreadsheet.</p>
+      </div>
+      <div class="card orange" style="margin-bottom:0;">
+        <h3>⚡ Run Pipeline Button</h3>
+        <p>Triggers <code>python run_pipeline.py</code> as a background subprocess. You can watch live logs stream to your browser without waiting on a terminal.</p>
+      </div>
+      <div class="card green" style="margin-bottom:0;">
+        <h3>🚀 Quick Run</h3>
+        <p>Runs <code>quick_run.py</code> — a faster, lighter version that ranks only a small batch without going through the full 3-stage pipeline. Useful for testing or urgent updates.</p>
+      </div>
+      <div class="card purple" style="margin-bottom:0;">
+        <h3>📋 Live Logs</h3>
+        <p>Streams <code>pipeline_ui.log</code> in real time to the browser using Server-Sent Events (SSE). You can watch every line of output as the pipeline runs.</p>
+      </div>
+      <div class="card teal" style="margin-bottom:0;">
+        <h3>🏆 Rankings View</h3>
+        <p>Displays ranking data from the Final sheet in a sortable table. Browse results by college, silo, or date without opening Google Sheets.</p>
+      </div>
+      <div class="card indigo" style="margin-bottom:0;">
+        <h3>📧 Email & Reports</h3>
+        <p>Sends ranking reports via email (SMTP configured in <code>ui_config.json</code>). Can export results as PDF or CSV for distribution to the content team.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="info-box yellow">
+    <span class="icon">🔒</span>
+    <div class="text"><strong>Pipeline Lock:</strong> When the full pipeline is running, a <code>pipeline_lock</code> is set in <code>pipeline_state.json</code>. This prevents Quick Run from starting simultaneously and corrupting the Intermediate tab. The lock is cleared automatically even if the pipeline crashes (using Python's <code>atexit</code> handler).</div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════ SECTION 9: DATA FLOW COMPLETE -->
+<div class="section">
+  <h2><span class="num">9</span> Complete Data Flow — From Source to Final</h2>
+  <p class="subtitle">A bird's eye view of everything that happens in one pipeline run.</p>
+
+  <div class="card" style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr><th>#</th><th>Step</th><th>Script/Tool</th><th>Input</th><th>Output</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>Load checkpoint position</td><td>phase1_populate.py</td><td>GS_Pipeline_State tab</td><td>Know where in Source to start</td></tr>
+        <tr><td>2</td><td>Read search traffic priorities</td><td>phase1_populate.py</td><td>Content tab (Add column)</td><td>Prioritized college list</td></tr>
+        <tr><td>3</td><td>Select 550 due colleges</td><td>phase1_populate.py</td><td>Source tab (rows from checkpoint)</td><td>List of college–course pairs</td></tr>
+        <tr><td>4</td><td>Build keywords (5–6 per college)</td><td>phase1_populate.py</td><td>Colleges_Short_Form.csv + course names</td><td>2,750–3,300 keyword rows</td></tr>
+        <tr><td>5</td><td>Write keywords to Intermediate</td><td>phase1_populate.py</td><td>Generated keywords</td><td>Intermediate tab: cols A–E filled</td></tr>
+        <tr><td>6</td><td>Write run_start_col to Source!Z1</td><td>phase1_populate.py</td><td>Current run number</td><td>Source!Z1 = column number for Apps Script</td></tr>
+        <tr><td>7</td><td>Save checkpoint + update state</td><td>phase1_populate.py</td><td>New position in Source</td><td>GS_Pipeline_State tab updated</td></tr>
+        <tr><td>8</td><td>Call Apps Script Execution API</td><td>run_pipeline.py</td><td>checkRanksBatched() function</td><td>Apps Script starts running in Google cloud</td></tr>
+        <tr><td>9</td><td>Query Bright Data SERP API</td><td>Apps Script (JS)</td><td>Each keyword from Intermediate col E</td><td>Top 50 Google results per keyword</td></tr>
+        <tr><td>10</td><td>Find Collegedunia rank in results</td><td>Apps Script (JS)</td><td>Search result page HTML/JSON</td><td>Rank number + URL</td></tr>
+        <tr><td>11</td><td>Write rank back to Intermediate</td><td>Apps Script (JS)</td><td>Rank + URL found</td><td>Intermediate cols F, G, H filled</td></tr>
+        <tr><td>12</td><td>Repeat rounds until all ranked</td><td>run_pipeline.py loop</td><td>Count of unranked rows</td><td>All rows eventually have rank data</td></tr>
+        <tr><td>13</td><td>Read ranked Intermediate rows</td><td>phase2_build_master.py</td><td>Intermediate tab (filled F/G/H)</td><td>Grouped data by college–course–silo</td></tr>
+        <tr><td>14</td><td>Write date-stamped column group</td><td>phase2_build_master.py</td><td>Grouped silo data</td><td>Final tab: 13 new columns for this run</td></tr>
+        <tr><td>15</td><td>Update Content tab</td><td>phase2_build_master.py</td><td>This run's results</td><td>Content tab updated with latest ranks</td></tr>
+        <tr><td>16</td><td>Pipeline complete</td><td>run_pipeline.py</td><td>—</td><td>Dashboard shows "Idle", logs success</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════ SECTION 10: PROS CONS -->
+<div class="section">
+  <h2><span class="num">10</span> Pros, Cons, and Limitations</h2>
+  <p class="subtitle">An honest assessment of the current architecture.</p>
+
+  <div class="proscons">
+    <div class="pro-box">
+      <h3>✅ Strengths</h3>
+      <ul>
+        <li><strong>Fully automated end-to-end</strong> — runs itself every 15 days with zero manual intervention</li>
+        <li><strong>Scalable to 40,000+ keywords</strong> — the round-based Apps Script loop handles any volume</li>
+        <li><strong>No data loss</strong> — GS_Pipeline_State ensures the checkpoint survives server restarts and GitHub Actions' stateless environment</li>
+        <li><strong>Self-healing</strong> — pipeline lock clears on crash; daily guard prevents double-runs</li>
+        <li><strong>Historical tracking</strong> — Final tab grows rightward, enabling ranking trend analysis over time</li>
+        <li><strong>Smart prioritisation</strong> — high-traffic colleges (from Content tab) are ranked first</li>
+        <li><strong>Deletion sync</strong> — removing a college from Source automatically cleans up Intermediate and Final</li>
+        <li><strong>Live dashboard</strong> — Flask UI provides visibility without needing to SSH into the server</li>
+        <li><strong>Cost-effective</strong> — PythonAnywhere free/basic tier + Google Sheets + GitHub Actions (free) = near-zero cost</li>
+      </ul>
+    </div>
+    <div class="con-box">
+      <h3>⚠️ Limitations</h3>
+      <ul>
+        <li><strong>Single point of failure on PythonAnywhere</strong> — if the server goes down mid-run, the pipeline stops; manual restart required</li>
+        <li><strong>Apps Script 6-minute limit</strong> — each invocation covers limited rows; very large batches need many rounds</li>
+        <li><strong>Bright Data API cost</strong> — SERP API calls are paid; high volume = higher cost</li>
+        <li><strong>Google API rate limits</strong> — gspread calls can hit Sheets API quotas on very large sheets</li>
+        <li><strong>OAuth token expiry</strong> — token.json refresh tokens can expire; requires manual re-authentication via browser</li>
+        <li><strong>No parallel college processing</strong> — colleges are ranked sequentially by Apps Script, not in parallel across multiple workers</li>
+        <li><strong>Final sheet column explosion</strong> — after 50+ runs, the Final tab has 650+ columns, which can be hard to navigate</li>
+        <li><strong>No alerting on failure</strong> — if a run fails silently, you only notice when checking the dashboard</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════ SECTION 11: KEYWORD LOGIC -->
+<div class="section">
+  <h2><span class="num">11</span> Keyword Generation Logic — The "Silo" Concept</h2>
+  <p class="subtitle">How each college's keywords are derived and what "silo" means.</p>
+
+  <div class="card">
+    <h3>What is a Silo?</h3>
+    <p>On Collegedunia, each college has multiple article pages — the main overview page, an Admissions article, a Fees article, a Placements article, etc. We call each article type a <strong>"silo."</strong> The pipeline tracks the Google ranking for each silo separately.</p>
+
+    <h3>The Short Name</h3>
+    <p>Full college names like <em>"Indian Institute of Technology Bombay, Powai, Maharashtra"</em> make terrible search queries. The pipeline uses a <strong>short form</strong> from <code>Colleges_Short_Form.csv</code> (e.g., "IIT Bombay"). If a college isn't in the CSV, it auto-extracts the short form from the full name.</p>
+
+    <h3>Keyword Formula</h3>
+    <p>The base keyword = <code>[College Short Name] + [Course Short Name]</code>. Then one keyword per silo is created by appending a suffix:</p>
+    <table style="margin-top:12px;">
+      <thead><tr><th>Silo</th><th>Suffix Added</th><th>Example Keyword</th><th>Maps to which article</th></tr></thead>
+      <tbody>
+        <tr><td>Main</td><td><em>none</em></td><td>IIT Bombay B.Tech CSE</td><td>College overview / main page</td></tr>
+        <tr><td>Admissions</td><td>" Admissions"</td><td>IIT Bombay B.Tech CSE Admissions</td><td>Admissions article</td></tr>
+        <tr><td>Fees</td><td>" Fees"</td><td>IIT Bombay B.Tech CSE Fees</td><td>Fees article</td></tr>
+        <tr><td>Placements</td><td>" Placements"</td><td>IIT Bombay B.Tech CSE Placements</td><td>Placements article</td></tr>
+        <tr><td>Scholarships</td><td>" Scholarships"</td><td>IIT Bombay B.Tech CSE Scholarships</td><td>Scholarships article</td></tr>
+        <tr><td>Single_Course</td><td>" (specialization)"</td><td>IIT Bombay B.Tech CSE (Computer Science)</td><td>Specific course page</td></tr>
+      </tbody>
+    </table>
+    <p style="margin-top:12px;">The <strong>Single_Course</strong> silo only exists if the course name has a specialization in parentheses, e.g., <em>"B.Tech (Computer Science and Engineering)"</em>.</p>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════ SECTION 12: GLOSSARY -->
+<div class="section">
+  <h2><span class="num">12</span> Glossary — Key Terms Explained</h2>
+
+  <div class="card-grid">
+    <div class="card blue"><h3>SERP</h3><p>Search Engine Results Page — the Google results page you see when you search for something. The pipeline checks what position Collegedunia appears on this page.</p></div>
+    <div class="card orange"><h3>Bright Data</h3><p>A data platform that provides SERP scraping — it queries Google on your behalf and returns structured results. Used here because direct Google scraping is blocked.</p></div>
+    <div class="card green"><h3>Apps Script</h3><p>Google's JavaScript runtime that runs inside Google Workspace (Sheets, Docs, etc.). It can read/write Sheets and make HTTP requests natively, without complex auth setup.</p></div>
+    <div class="card purple"><h3>OAuth / token.json</h3><p>Google's authentication protocol. After you log in once via browser, Google gives you a <code>token.json</code> file that the pipeline uses to access Sheets without logging in again.</p></div>
+    <div class="card teal"><h3>Checkpoint Row</h3><p>A number saved in GS_Pipeline_State that remembers where in the 8,000-row Source list the pipeline stopped last time. Like a bookmark in a book.</p></div>
+    <div class="card indigo"><h3>Silo</h3><p>One specific article type on a college's Collegedunia page — Main, Admissions, Fees, Placements, Scholarships, or Single_Course. Each has its own Google ranking.</p></div>
+    <div class="card red"><h3>Pipeline Lock</h3><p>A flag set in <code>pipeline_state.json</code> while the full pipeline is running. Prevents Quick Run from starting simultaneously and corrupting data.</p></div>
+    <div class="card orange"><h3>Run Number</h3><p>Which iteration of the 15-day cycle this is. Run 1 = first ever ranking; Run 2 = second ranking (15 days later), etc. Each run adds 13 columns to Final.</p></div>
+  </div>
+</div>
+
+</div><!-- /container -->
+
+<div class="footer">
+  Collegedunia Ranking Pipeline — Full Technical Explainer &nbsp;|&nbsp; Built by Charitra Jain &nbsp;|&nbsp; Document generated 2026-05-31
+</div>
+
+</body>
+</html>

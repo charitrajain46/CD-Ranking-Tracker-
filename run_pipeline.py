@@ -333,40 +333,109 @@ def run_stage3() -> bool:
 #  EMAIL NOTIFICATION
 # ══════════════════════════════════════════════════════════════
 
-def send_pipeline_email(state: dict, status: str, elapsed_str: str, spreadsheet_id: str) -> None:
-    """Send email notification after pipeline run (manual or scheduled)."""
-    smtp_email    = state.get("notify_email", "")
-    smtp_password = state.get("notify_email_password", "")
-    recipients    = state.get("notify_recipients", "")
+UI_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui_config.json")
 
-    if not smtp_email or not smtp_password:
+def _load_email_config(state: dict) -> dict:
+    """
+    Build a single email config dict by merging ui_config.json (Email & Distribution tab)
+    with pipeline_state.json fields.  ui_config.json takes priority for SMTP settings
+    since the user configured it via the UI.
+    """
+    # Hard-coded recipients (same as pipeline_cron.yml)
+    FIXED_RECIPIENTS = [
+        "shivang.singh@collegedunia.com",
+        "charitra.jain@collegedunia.com",
+        "anurag.priyadarshan@collegedunia.com",
+    ]
+
+    cfg = {
+        "smtp_host":     "smtp.gmail.com",
+        "smtp_port":     465,
+        "smtp_user":     "",
+        "smtp_password": "",
+        "smtp_from":     "",
+        "to_list":       FIXED_RECIPIENTS,   # always send to these
+    }
+
+    # 1. Try ui_config.json (set via the Email & Distribution tab in the UI)
+    if os.path.exists(UI_CONFIG_FILE):
+        try:
+            with open(UI_CONFIG_FILE) as f:
+                ui = json.load(f)
+            if ui.get("smtp_host"):   cfg["smtp_host"]     = ui["smtp_host"]
+            if ui.get("smtp_port"):   cfg["smtp_port"]      = int(ui["smtp_port"])
+            if ui.get("smtp_user"):   cfg["smtp_user"]      = ui["smtp_user"]
+            if ui.get("smtp_password"): cfg["smtp_password"]= ui["smtp_password"]
+            if ui.get("smtp_from"):   cfg["smtp_from"]      = ui["smtp_from"]
+            recs = ui.get("recipients", [])
+            if recs:
+                extra = [r["email"] for r in recs if r.get("email")]
+                # Merge with fixed recipients (no duplicates)
+                cfg["to_list"] = list(dict.fromkeys(FIXED_RECIPIENTS + extra))
+        except Exception:
+            pass
+
+    # 2. Fall back to pipeline_state.json fields if UI config is incomplete
+    if not cfg["smtp_user"] and state.get("notify_email"):
+        cfg["smtp_user"]     = state["notify_email"]
+        cfg["smtp_password"] = state.get("notify_email_password", "")
+        cfg["smtp_from"]     = state["notify_email"]
+
+    # Always ensure fixed recipients are in the list
+    cfg["to_list"] = list(dict.fromkeys(FIXED_RECIPIENTS + cfg["to_list"]))
+
+    return cfg
+
+
+def send_pipeline_email(state: dict, status: str, elapsed_str: str, spreadsheet_id: str) -> None:
+    """Send email notification after pipeline run — always called regardless of outcome."""
+    # Reload state from disk (phase1 may have updated it during the run)
+    try:
+        with open(STATE_FILE) as f:
+            state = json.load(f)
+    except Exception:
+        pass
+
+    cfg = _load_email_config(state)
+
+    if not cfg["smtp_user"] or not cfg["smtp_password"]:
         print("  ⚠ Email not configured — skipping notification.")
-        print("    Add notify_email / notify_email_password to pipeline_state.json to enable.")
+        print("    Configure SMTP in the Email & Distribution tab of the UI, or run setup.py.")
+        return
+    if not cfg["to_list"]:
+        print("  ⚠ No email recipients configured — skipping notification.")
         return
 
-    to_list = [r.strip() for r in recipients.split(",") if r.strip()] if recipients else [smtp_email]
-    icon    = "✅" if status == "success" else "❌"
-    subject = f"Pipeline Run {icon} {status.capitalize()} — Manual Run"
+    icon      = "✅" if status == "success" else ("⏭" if status == "skipped" else "❌")
     sheet_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit?usp=sharing"
-    body = f"""Pipeline run completed.
+    subject   = f"Pipeline Run {icon} {status.capitalize()} — {datetime.now().strftime('%Y-%m-%d %H:%M IST')}"
+    body      = f"""Pipeline run completed.
 
 Status   : {status}
 Run date : {datetime.now().strftime('%Y-%m-%d %H:%M IST')}
 Duration : {elapsed_str}
 
-🔗 View ranking results in Google Sheet:
+📊 View ranking results in Google Sheet:
 {sheet_url}
 """
     try:
         msg = MIMEText(body)
         msg["Subject"] = subject
-        msg["From"]    = smtp_email
-        msg["To"]      = ", ".join(to_list)
+        msg["From"]    = cfg["smtp_from"] or cfg["smtp_user"]
+        msg["To"]      = ", ".join(cfg["to_list"])
 
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(smtp_email, smtp_password)
-            server.sendmail(smtp_email, to_list, msg.as_string())
-        print(f"  ✓ Email sent to: {', '.join(to_list)}")
+        port = int(cfg["smtp_port"])
+        if port == 465:
+            with smtplib.SMTP_SSL(cfg["smtp_host"], 465) as srv:
+                srv.login(cfg["smtp_user"], cfg["smtp_password"])
+                srv.sendmail(msg["From"], cfg["to_list"], msg.as_string())
+        else:
+            with smtplib.SMTP(cfg["smtp_host"], port) as srv:
+                srv.ehlo(); srv.starttls()
+                srv.login(cfg["smtp_user"], cfg["smtp_password"])
+                srv.sendmail(msg["From"], cfg["to_list"], msg.as_string())
+
+        print(f"  ✓ Email sent → {', '.join(cfg['to_list'])}")
     except Exception as e:
         print(f"  ⚠ Email failed: {e}")
 
@@ -376,7 +445,9 @@ Duration : {elapsed_str}
 # ══════════════════════════════════════════════════════════════
 
 def main():
-    start_time = datetime.now()
+    start_time     = datetime.now()
+    final_status   = "failed"    # updated to "success" or "skipped" on clean exit
+    spreadsheet_id = ""
     banner(f"Collegedunia Rank Pipeline — FULL RUN  ({start_time.strftime('%Y-%m-%d %H:%M')})")
 
     # ── Load & validate ───────────────────────────────────────
@@ -390,71 +461,79 @@ def main():
     set_pipeline_lock(state)
     atexit.register(clear_pipeline_lock)   # clears lock even on crash
 
-    # ── Authenticate ──────────────────────────────────────────
-    # (Daily run guard is handled inside phase1_populate.py by
-    #  checking the Final sheet for today's date — not state.)
-    print("\nAuthenticating …")
-    creds = get_credentials()
-    gc    = gspread.authorize(creds)
-    print("  ✓ Authenticated")
-
-    # ── Open Intermediate tab (used for progress polling) ─────
     try:
-        sh       = gc.open_by_key(spreadsheet_id)
-        inter_ws = sh.worksheet("Intermediate")
-        print(f"  ✓ Opened spreadsheet: '{sh.title}'")
-    except gspread.exceptions.SpreadsheetNotFound:
-        print("ERROR: Spreadsheet not found — re-run setup.py.")
-        sys.exit(1)
-    except gspread.exceptions.WorksheetNotFound:
-        print("ERROR: 'Intermediate' tab not found — re-run setup.py.")
-        sys.exit(1)
+        # ── Authenticate ──────────────────────────────────────────
+        print("\nAuthenticating …")
+        creds = get_credentials()
+        gc    = gspread.authorize(creds)
+        print("  ✓ Authenticated")
 
-    # ── Build Apps Script API service (socket timeout = 8 min) ──
-    script_service = build("script", "v1", credentials=creds)
+        # ── Open Intermediate tab (used for progress polling) ─────
+        try:
+            sh       = gc.open_by_key(spreadsheet_id)
+            inter_ws = sh.worksheet("Intermediate")
+            print(f"  ✓ Opened spreadsheet: '{sh.title}'")
+        except gspread.exceptions.SpreadsheetNotFound:
+            print("ERROR: Spreadsheet not found — re-run setup.py.")
+            sys.exit(1)
+        except gspread.exceptions.WorksheetNotFound:
+            print("ERROR: 'Intermediate' tab not found — re-run setup.py.")
+            sys.exit(1)
 
-    # ── Stage 1 — Populate Intermediate ──────────────────────
-    ok = run_stage1()
-    if ok is None:
-        # Nothing to rank today — clean exit, not an error
+        # ── Build Apps Script API service (socket timeout = 8 min) ──
+        script_service = build("script", "v1", credentials=creds)
+
+        # ── Stage 1 — Populate Intermediate ──────────────────────
+        ok = run_stage1()
+        if ok is None:
+            # Nothing to rank today — clean exit, not an error
+            elapsed = datetime.now() - start_time
+            elapsed_str = f"{int(elapsed.total_seconds() // 60)}m {int(elapsed.total_seconds() % 60)}s"
+            banner(f"✓ PIPELINE SKIPPED — Nothing to rank today  ({elapsed_str})")
+            print(f"  Finished at: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+            print()
+            final_status = "skipped"
+            send_pipeline_email(state, "skipped", elapsed_str, spreadsheet_id)
+            sys.exit(0)
+        if not ok:
+            print("\nPipeline aborted at Stage 1.")
+            sys.exit(1)
+
+        # ── Stage 2 — Run Apps Script ranking ────────────────────
+        ok = run_stage2(script_service, script_id, inter_ws)
+        if not ok:
+            print("\nRanking stage had issues. Final tab may be partially populated.")
+            print("You can:")
+            print("  • Fix the issue and run  python run_pipeline.py  again")
+            print("  • Or run Apps Script manually from the spreadsheet")
+            print("  • Then run  python phase2_build_master.py  to finish Stage 3")
+            sys.exit(1)
+
+        # ── Stage 3 — Build Content tab ──────────────────────────
+        ok = run_stage3()
+        if not ok:
+            print("\nPipeline aborted at Stage 3.")
+            sys.exit(1)
+
+        # ── Done ──────────────────────────────────────────────────
         elapsed = datetime.now() - start_time
-        banner(f"✓ PIPELINE SKIPPED — Nothing to rank today  ({int(elapsed.total_seconds())}s)")
+        mins    = int(elapsed.total_seconds() // 60)
+        secs    = int(elapsed.total_seconds() % 60)
+        elapsed_str = f"{mins}m {secs}s"
+
+        banner(f"✓ PIPELINE COMPLETE  (took {elapsed_str})")
+        print(f"  Spreadsheet: https://docs.google.com/spreadsheets/d/{spreadsheet_id}")
         print(f"  Finished at: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
         print()
-        sys.exit(0)
-    if not ok:
-        print("\nPipeline aborted at Stage 1.")
-        sys.exit(1)
+        final_status = "success"
 
-    # ── Stage 2 — Run Apps Script ranking ────────────────────
-    ok = run_stage2(script_service, script_id, inter_ws)
-    if not ok:
-        print("\nRanking stage had issues. Final tab may be partially populated.")
-        print("You can:")
-        print("  • Fix the issue and run  python run_pipeline.py  again")
-        print("  • Or run Apps Script manually from the spreadsheet")
-        print("  • Then run  python phase2_build_master.py  to finish Stage 3")
-        sys.exit(1)
-
-    # ── Stage 3 — Build Content tab ──────────────────────────
-    ok = run_stage3()
-    if not ok:
-        print("\nPipeline aborted at Stage 3.")
-        sys.exit(1)
-
-    # ── Done ──────────────────────────────────────────────────
-    elapsed = datetime.now() - start_time
-    mins    = int(elapsed.total_seconds() // 60)
-    secs    = int(elapsed.total_seconds() % 60)
-    elapsed_str = f"{mins}m {secs}s"
-
-    banner(f"✓ PIPELINE COMPLETE  (took {elapsed_str})")
-    print(f"  Spreadsheet: https://docs.google.com/spreadsheets/d/{spreadsheet_id}")
-    print(f"  Finished at: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    print()
-
-    # Send email notification for manual runs
-    send_pipeline_email(state, "success", elapsed_str, spreadsheet_id)
+    finally:
+        # ── Always send email (success / skipped / failed) ────────
+        elapsed = datetime.now() - start_time
+        elapsed_str = f"{int(elapsed.total_seconds() // 60)}m {int(elapsed.total_seconds() % 60)}s"
+        # Only send if not already sent for "skipped" path above
+        if final_status != "skipped":
+            send_pipeline_email(state, final_status, elapsed_str, spreadsheet_id)
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ Start:
 Then open:  http://localhost:5050
 """
 
-import os, sys, json, csv, time, threading, subprocess, smtplib, logging, shutil
+import os, sys, json, csv, time, threading, subprocess, smtplib, logging, shutil, signal
 from datetime import datetime, date, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text      import MIMEText
@@ -215,6 +215,7 @@ def stream_subprocess(cmd: list, stdin_data: str = None, cwd: str = None,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         stdin=subprocess.PIPE if stdin_data else None,
         cwd=cwd or BASE_DIR, env=env, text=True, bufsize=1,
+        preexec_fn=os.setsid,   # new process group → lets us kill the whole tree
     )
 
     if proc_key:
@@ -238,7 +239,7 @@ def stream_subprocess(cmd: list, stdin_data: str = None, cwd: str = None,
 
     if proc.returncode in (0, 2):
         yield sse_event("", event="done")
-    elif proc.returncode == -15:          # SIGTERM — user terminated
+    elif proc.returncode in (-15, -9):    # SIGTERM / SIGKILL — user terminated
         yield sse_event("⛔ Terminated by user.", event="done")
     else:
         yield sse_event(f"Process exited with code {proc.returncode}", event="error")
@@ -397,7 +398,7 @@ def api_clear_lock():
 
 @app.route("/api/terminate", methods=["POST"])
 def api_terminate():
-    """Kill the currently running pipeline or quick run subprocess."""
+    """Kill the currently running pipeline or quick run subprocess (and all children)."""
     body   = request.get_json(force=True, silent=True) or {}
     target = body.get("target", "")   # "pipeline" or "quickrun"
 
@@ -409,8 +410,17 @@ def api_terminate():
         return jsonify({"message": "No running process found."})
 
     try:
-        proc.terminate()   # sends SIGTERM — graceful stop
-        log.info(f"Terminate requested for: {target}")
+        # Kill the entire process group — catches child processes (e.g. Apps Script waits)
+        try:
+            pgid = os.getpgid(proc.pid)
+            os.killpg(pgid, signal.SIGKILL)   # SIGKILL cannot be caught or ignored
+            log.info(f"SIGKILL sent to process group {pgid} ({target})")
+        except ProcessLookupError:
+            pass   # process already exited
+        except Exception:
+            proc.kill()   # fallback: kill just the direct process
+            log.info(f"proc.kill() fallback for: {target}")
+
         return jsonify({"message": f"⛔ {target.capitalize()} terminated. "
                                     "Data generated so far is preserved."})
     except Exception as e:
