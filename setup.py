@@ -276,10 +276,34 @@ def main() -> None:
     write_header_if_empty(content_ws, CONTENT_HEADER, TAB_CONTENT)
 
     # ── Save state ────────────────────────────────────────────
-    state["spreadsheet_id"]    = ss_id
-    state["script_id"]         = script_id or state.get("script_id")
-    state.setdefault("batches",            [])
-    state.setdefault("next_batch_to_rank", 0)
+    # ── Prompt for email notification config ─────────────────
+    print("\n[Step 3/3]  EMAIL NOTIFICATIONS  (for manual pipeline runs)")
+    print("  Uses Gmail SMTP. Create an App Password at:")
+    print("  https://myaccount.google.com/apppasswords\n")
+
+    existing_email = state.get("notify_email", "")
+    if existing_email:
+        print(f"  (current sender: {existing_email})")
+    raw_email = input("  Sender Gmail address (or Enter to keep/skip): ").strip()
+    notify_email = raw_email if raw_email else existing_email
+
+    notify_password = state.get("notify_email_password", "")
+    if notify_email:
+        raw_pass = input("  Gmail App Password (or Enter to keep): ").strip()
+        if raw_pass:
+            notify_password = raw_pass
+
+    existing_recipients = state.get("notify_recipients", "")
+    if existing_recipients:
+        print(f"  (current recipients: {existing_recipients})")
+    raw_recip = input("  Recipient emails comma-separated (or Enter to keep/use sender): ").strip()
+    notify_recipients = raw_recip if raw_recip else existing_recipients
+
+    state["spreadsheet_id"]        = ss_id
+    state["script_id"]             = script_id or state.get("script_id")
+    state["notify_email"]          = notify_email
+    state["notify_email_password"] = notify_password
+    state["notify_recipients"]     = notify_recipients or notify_email
     state.setdefault("phase1_last_run",    None)
     state.setdefault("phase2_last_run",    None)
     save_state(state)

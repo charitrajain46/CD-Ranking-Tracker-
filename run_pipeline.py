@@ -51,7 +51,8 @@ After these 5 steps, run:  python run_pipeline.py
 ══════════════════════════════════════════════════════════════
 """
 
-import os, sys, json, time, subprocess, socket, atexit
+import os, sys, json, time, subprocess, socket, atexit, smtplib
+from email.mime.text import MIMEText
 from datetime import datetime, date, timedelta
 
 import gspread
@@ -329,6 +330,48 @@ def run_stage3() -> bool:
 
 
 # ══════════════════════════════════════════════════════════════
+#  EMAIL NOTIFICATION
+# ══════════════════════════════════════════════════════════════
+
+def send_pipeline_email(state: dict, status: str, elapsed_str: str, spreadsheet_id: str) -> None:
+    """Send email notification after pipeline run (manual or scheduled)."""
+    smtp_email    = state.get("notify_email", "")
+    smtp_password = state.get("notify_email_password", "")
+    recipients    = state.get("notify_recipients", "")
+
+    if not smtp_email or not smtp_password:
+        print("  ⚠ Email not configured — skipping notification.")
+        print("    Add notify_email / notify_email_password to pipeline_state.json to enable.")
+        return
+
+    to_list = [r.strip() for r in recipients.split(",") if r.strip()] if recipients else [smtp_email]
+    icon    = "✅" if status == "success" else "❌"
+    subject = f"Pipeline Run {icon} {status.capitalize()} — Manual Run"
+    sheet_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit?usp=sharing"
+    body = f"""Pipeline run completed.
+
+Status   : {status}
+Run date : {datetime.now().strftime('%Y-%m-%d %H:%M IST')}
+Duration : {elapsed_str}
+
+🔗 View ranking results in Google Sheet:
+{sheet_url}
+"""
+    try:
+        msg = MIMEText(body)
+        msg["Subject"] = subject
+        msg["From"]    = smtp_email
+        msg["To"]      = ", ".join(to_list)
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(smtp_email, smtp_password)
+            server.sendmail(smtp_email, to_list, msg.as_string())
+        print(f"  ✓ Email sent to: {', '.join(to_list)}")
+    except Exception as e:
+        print(f"  ⚠ Email failed: {e}")
+
+
+# ══════════════════════════════════════════════════════════════
 #  MAIN
 # ══════════════════════════════════════════════════════════════
 
@@ -403,11 +446,15 @@ def main():
     elapsed = datetime.now() - start_time
     mins    = int(elapsed.total_seconds() // 60)
     secs    = int(elapsed.total_seconds() % 60)
+    elapsed_str = f"{mins}m {secs}s"
 
-    banner(f"✓ PIPELINE COMPLETE  (took {mins}m {secs}s)")
+    banner(f"✓ PIPELINE COMPLETE  (took {elapsed_str})")
     print(f"  Spreadsheet: https://docs.google.com/spreadsheets/d/{spreadsheet_id}")
     print(f"  Finished at: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print()
+
+    # Send email notification for manual runs
+    send_pipeline_email(state, "success", elapsed_str, spreadsheet_id)
 
 
 if __name__ == "__main__":

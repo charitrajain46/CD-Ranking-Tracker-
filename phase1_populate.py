@@ -462,28 +462,53 @@ def sync_deletions(inter_ws, data_rows, final_ws, final_all, all_source_cids):
 
 
 # ══════════════════════════════════════════════════════════════
-#  CHECKPOINT CLEANUP  (one-time legacy removal)
+#  CHECKPOINT ROW  (written to Source sheet after each batch)
 # ══════════════════════════════════════════════════════════════
 
-def remove_checkpoint_rows(src_ws, src_raw):
-    """
-    Delete any '---CHECKPOINT---' rows from Source.
-    The 15-day cycle replaces the checkpoint system entirely.
-    """
-    marker   = "---CHECKPOINT---"
-    to_delete = []
+CHECKPOINT_MARKER = "---CHECKPOINT---"
+
+def find_checkpoint_idx(src_raw):
+    """Return 0-based index in src_raw of the ---CHECKPOINT--- row, or -1."""
     for i, row in enumerate(src_raw):
         if i == 0:
             continue
-        if row and str(row[0]).strip() == marker:
-            to_delete.append(i + 1)   # 1-based sheet row
+        if row and str(row[0]).strip() == CHECKPOINT_MARKER:
+            return i
+    return -1
 
-    if to_delete:
-        for sheet_row in sorted(to_delete, reverse=True):
-            src_ws.delete_rows(sheet_row)
-        print(f"  Removed {len(to_delete)} legacy checkpoint row(s) from Source.")
 
-    return len(to_delete)
+def write_source_checkpoint(src_ws, src_raw, last_processed_cid, cid_col_idx):
+    """
+    Delete all existing ---CHECKPOINT--- rows from Source, then insert a new one
+    immediately after the last row that belongs to last_processed_cid.
+    """
+    # Find the last sheet row (1-based) for last_processed_cid
+    last_sheet_row = -1
+    for i, row in enumerate(src_raw):
+        if i == 0:
+            continue
+        if len(row) > cid_col_idx and str(row[cid_col_idx]).strip() == last_processed_cid:
+            last_sheet_row = i + 1   # convert to 1-based
+
+    if last_sheet_row < 0:
+        print(f"  WARNING: Could not find rows for {last_processed_cid} — checkpoint not written.")
+        return
+
+    # Delete existing checkpoint rows (bottom-to-top so indices stay valid)
+    old_rows = [
+        i + 1 for i, row in enumerate(src_raw)
+        if i > 0 and row and str(row[0]).strip() == CHECKPOINT_MARKER
+    ]
+    adjustment = 0
+    for sr in sorted(old_rows, reverse=True):
+        src_ws.delete_rows(sr)
+        if sr <= last_sheet_row:
+            adjustment += 1   # rows above shifted up
+
+    insert_at = last_sheet_row - adjustment + 1   # insert AFTER last college row
+    src_ws.insert_row([CHECKPOINT_MARKER], insert_at)
+    print(f"  ✓ ---CHECKPOINT--- written after college {last_processed_cid} "
+          f"(Source row {insert_at})")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -651,25 +676,21 @@ def main():
         sys.exit(EXIT_ERROR)
     src_header = src_raw[0]
 
-    # Remove legacy checkpoint rows (one-time cleanup)
-    n_removed = remove_checkpoint_rows(src_ws, src_raw)
-    if n_removed:
-        src_raw    = src_ws.get_all_values()   # re-read after cleanup
-        src_header = src_raw[0]
+    # Find college_id column index (needed for checkpoint row writing)
+    cid_col_idx = 0
+    for _i, _h in enumerate(src_header):
+        if _h.strip().lower().replace(" ", "_") in ("college_id", "collegeid"):
+            cid_col_idx = _i
+            break
 
-    # Parse all Source records → {college_id: [records]}
-    all_source_records = {}   # {cid: [record_dict, ...]}
-    all_source_cids    = set()
+    # Parse all Source records (skip ---CHECKPOINT--- rows)
+    all_source_cids = set()
     for row in src_raw[1:]:
         if not any(str(v).strip() for v in row):
             continue
-        record = {src_header[i]: (row[i] if i < len(row) else "")
-                  for i in range(len(src_header))}
-        cid = _flex(record, "college_id", "College_Id", "College_ID")
-        if not cid:
-            continue
-        all_source_cids.add(cid)
-        all_source_records.setdefault(cid, []).append(record)
+        cid = str(row[cid_col_idx]).strip() if cid_col_idx < len(row) else ""
+        if cid and cid != CHECKPOINT_MARKER:
+            all_source_cids.add(cid)
 
     print(f"  Source       : {len(all_source_cids)} unique colleges")
 
@@ -698,135 +719,97 @@ def main():
     else:
         print("  No deletions needed.")
 
-    # ── [5] Checkpoint-based selection ────────────────────────
-    print("\n[6/6] Checkpoint selection …")
+    # ── [5] Checkpoint + batch selection ──────────────────────
+    print("\n[6/6] Batch selection …")
 
-    # Build ordered Source list — ONE entry per unique college (first course only).
-    # Batches and sampling operate on colleges, not (college × course) pairs,
-    # so a college with 10 courses still occupies exactly ONE slot in a batch.
-    src_ordered = []
-    seen_cids   = set()
-    for row in src_raw[1:]:
+    # Load Add values from Content (used to rank colleges within each batch)
+    add_values = load_add_values(sh)
+
+    # Find ---CHECKPOINT--- row in Source
+    cp_idx = find_checkpoint_idx(src_raw)   # 0-based index in src_raw, -1 = not found
+
+    # Build two ordered lists: colleges BEFORE checkpoint (done this cycle)
+    # and colleges AFTER checkpoint (candidates for this run).
+    # Each list has ONE entry per unique college (first-seen Source row order).
+    before_cp = []   # already processed this cycle
+    after_cp  = []   # next to process
+    seen_cids = set()
+
+    for i, row in enumerate(src_raw):
+        if i == 0:
+            continue   # skip header
         if not any(str(v).strip() for v in row):
             continue
-        record = {src_header[i]: (row[i] if i < len(row) else "")
-                  for i in range(len(src_header))}
-        cid = _flex(record, "college_id", "College_Id", "College_ID")
-        if not cid or cid in seen_cids:
+        cid = str(row[cid_col_idx]).strip() if cid_col_idx < len(row) else ""
+        if not cid or cid == CHECKPOINT_MARKER or cid in seen_cids:
             continue
+        record = {src_header[j]: (row[j] if j < len(row) else "")
+                  for j in range(len(src_header))}
         seen_cids.add(cid)
-        src_ordered.append((cid, record))   # first course row for this college
-
-    total_src = len(src_ordered)
-    print(f"  Source ordered pairs : {total_src}")
-
-    # Load GS checkpoint state
-    gs_state         = load_gs_state(sh)
-    checkpoint_row   = gs_state["checkpoint_row"]
-    cycle_start_date = gs_state["cycle_start_date"] or today.isoformat()
-
-    print(f"  Checkpoint position  : {checkpoint_row} / {total_src}")
-
-    # Wrap checkpoint if Source is exhausted
-    if checkpoint_row >= total_src:
-        checkpoint_row   = 0
-        cycle_start_date = today.isoformat()
-        print(f"  Checkpoint wrapped → new cycle started {cycle_start_date}")
-
-    # Load deferred queue (new colleges that couldn't fit in a previous day's 550)
-    try:
-        deferred_pairs = json.loads(gs_state["deferred_new_json"])
-    except (json.JSONDecodeError, TypeError):
-        deferred_pairs = []
-
-    last_ranked  = get_last_ranked_dates(data_rows)
-
-    selected     = []   # (cid, record) to rank today — max 550
-    selected_new = []   # new cids (not yet in Intermediate)
-    selected_re  = []   # existing cids due for re-ranking
-    all_due      = []   # all due candidates encountered (for summary)
-
-    # ── Rank deferred new colleges first ─────────────────────
-    remaining_deferred = []
-    for cid_d, course_id_d in deferred_pairs:
-        # Find record from src_ordered
-        rec_d = None
-        for cid2, rec2 in src_ordered:
-            if cid2 == cid_d:
-                rc2 = _flex(rec2, "course_id", "Course_Id", "Course_ID")
-                if rc2 == course_id_d:
-                    rec_d = rec2
-                    break
-        if rec_d is None:
-            continue   # college removed from Source — skip silently
-
-        all_due.append((cid_d, rec_d))
-        if len(selected) < MAX_DAILY_COLLEGES:
-            selected.append((cid_d, rec_d))
-            selected_new.append(cid_d)
+        if cp_idx < 0 or i > cp_idx:
+            after_cp.append((cid, record))
         else:
-            remaining_deferred.append((cid_d, course_id_d))
+            before_cp.append((cid, record))
 
-    # ── Walk Source from checkpoint, take batches of 50 ──────
-    deferred_new_today = []   # new colleges found but beyond 550 today
+    total_src = len(before_cp) + len(after_cp)
 
-    i = checkpoint_row
-    while i < total_src:
-        batch  = src_ordered[i : i + SUBGROUP_SIZE]
-        # Always apply 40% sampling so each batch of 50 contributes ~20 colleges.
-        # Sampling applies regardless of total source size.
-        n_pick = max(1, round(len(batch) * SAMPLE_RATIO))
-        picked = batch[:n_pick]
-        i     += len(batch)   # advance checkpoint past full batch
+    # If no colleges remain after checkpoint → full cycle done, wrap around
+    if not after_cp:
+        after_cp  = before_cp + after_cp   # restart from beginning
+        before_cp = []
+        cp_idx    = -1
+        print(f"  All batches processed — starting new 15-day cycle.")
 
-        for cid, record in picked:
-            lr     = last_ranked.get(cid)
-            is_new = cid not in inter_cids
-            is_due = is_new or (lr is None) or ((today - lr).days >= CYCLE_DAYS)
+    # Take ONE batch of SUBGROUP_SIZE colleges from after_cp
+    batch_colleges = after_cp[:SUBGROUP_SIZE]
+    last_processed_cid = batch_colleges[-1][0] if batch_colleges else None
 
-            if not is_due:
-                continue   # ranked recently — wait for 15-day cycle
+    # Within the batch: sort by Add value DESC, pick top 40%
+    batch_sorted = sorted(batch_colleges,
+                          key=lambda x: add_values.get(x[0], 0.0),
+                          reverse=True)
+    n_pick = max(1, round(len(batch_sorted) * SAMPLE_RATIO))
+    picked = batch_sorted[:n_pick]
 
-            all_due.append((cid, record))
+    print(f"  Checkpoint position  : {cp_idx} in src_raw  "
+          f"({len(before_cp)} processed, {len(after_cp)} remaining)")
+    print(f"  Batch size           : {len(batch_colleges)} colleges  →  "
+          f"picking top {n_pick} by Add value")
 
-            if len(selected) < MAX_DAILY_COLLEGES:
-                selected.append((cid, record))
-                if is_new:
-                    selected_new.append(cid)
-                else:
-                    selected_re.append(cid)
-            else:
-                # Overflow — defer new colleges; existing ones will be picked
-                # again when checkpoint cycles back (~15 days)
-                if is_new:
-                    course_id_r = _flex(record, "course_id", "Course_Id", "Course_ID")
-                    deferred_new_today.append((cid, record))
-                    remaining_deferred.append((cid, course_id_r))
+    last_ranked = get_last_ranked_dates(data_rows)
 
-        # ── Save checkpoint after every batch ──────────────────
-        # This ensures terminate mid-run still preserves progress.
-        batch_checkpoint = i if i < total_src else total_src
-        gs_state["checkpoint_row"]    = batch_checkpoint
-        gs_state["cycle_start_date"]  = cycle_start_date
-        gs_state["last_run_date"]     = today.isoformat()
-        gs_state["deferred_new_json"] = json.dumps(remaining_deferred)
-        save_gs_state(gs_state)
-        print(f"  Checkpoint saved after batch: {batch_checkpoint} / {total_src}")
+    selected     = []
+    selected_new = []
+    selected_re  = []
+    all_due      = []
 
-        if len(selected) >= MAX_DAILY_COLLEGES:
-            break   # stop advancing checkpoint when batch is full
+    for cid, record in picked:
+        lr     = last_ranked.get(cid)
+        is_new = cid not in inter_cids
+        is_due = is_new or (lr is None) or ((today - lr).days >= CYCLE_DAYS)
 
-    new_cids      = set(selected_new)
-    selected_cids = set(cid for cid, _ in selected)
-    unselected_new = deferred_new_today   # new colleges pushed to tomorrow
+        if not is_due:
+            continue   # ranked recently — skip until 15-day cycle
 
-    new_checkpoint = gs_state["checkpoint_row"]   # already saved inside loop
+        all_due.append((cid, record))
+        selected.append((cid, record))
+        if is_new:
+            selected_new.append(cid)
+        else:
+            selected_re.append(cid)
+
+    new_cids       = set(selected_new)
+    selected_cids  = set(cid for cid, _ in selected)
+    unselected_new = []   # no overflow with single-batch approach
+
+    # Write ---CHECKPOINT--- to Source after last college of this batch
+    if last_processed_cid:
+        write_source_checkpoint(src_ws, src_raw, last_processed_cid, cid_col_idx)
 
     print(f"\n  Due colleges found     : {len(all_due)}")
     print(f"  Selected for ranking   : {len(selected)}"
           f"  ({len(selected_new)} new + {len(selected_re)} re-rank)")
-    print(f"  Deferred new (tmrw)    : {len(unselected_new)}")
-    print(f"  Checkpoint after run   : {new_checkpoint} / {total_src}")
+    print(f"  Batch end college      : {last_processed_cid}")
 
     # Nothing to do?
     if not selected:

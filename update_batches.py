@@ -129,7 +129,7 @@ def update_source_batches(sh, subgroup_size: int = SUBGROUP_SIZE):
         if not any(str(v).strip() for v in row):
             continue
         cid = str(row[cid_col]).strip() if cid_col < len(row) else ""
-        if cid and cid not in seen:
+        if cid and cid not in seen and cid != "---CHECKPOINT---":
             unique_cids.append(cid)
             seen.add(cid)
 
