@@ -803,6 +803,16 @@ def main():
                     deferred_new_today.append((cid, record))
                     remaining_deferred.append((cid, course_id_r))
 
+        # ── Save checkpoint after every batch ──────────────────
+        # This ensures terminate mid-run still preserves progress.
+        batch_checkpoint = i if i < total_src else total_src
+        gs_state["checkpoint_row"]    = batch_checkpoint
+        gs_state["cycle_start_date"]  = cycle_start_date
+        gs_state["last_run_date"]     = today.isoformat()
+        gs_state["deferred_new_json"] = json.dumps(remaining_deferred)
+        save_gs_state(gs_state)
+        print(f"  Checkpoint saved after batch: {batch_checkpoint} / {total_src}")
+
         if len(selected) >= MAX_DAILY_COLLEGES:
             break   # stop advancing checkpoint when batch is full
 
@@ -810,13 +820,7 @@ def main():
     selected_cids = set(cid for cid, _ in selected)
     unselected_new = deferred_new_today   # new colleges pushed to tomorrow
 
-    # ── Save updated checkpoint ───────────────────────────────
-    new_checkpoint = i if i < total_src else total_src   # total_src → wraps next run
-    gs_state["checkpoint_row"]    = new_checkpoint
-    gs_state["cycle_start_date"]  = cycle_start_date
-    gs_state["last_run_date"]     = today.isoformat()
-    gs_state["deferred_new_json"] = json.dumps(remaining_deferred)
-    save_gs_state(gs_state)
+    new_checkpoint = gs_state["checkpoint_row"]   # already saved inside loop
 
     print(f"\n  Due colleges found     : {len(all_due)}")
     print(f"  Selected for ranking   : {len(selected)}"

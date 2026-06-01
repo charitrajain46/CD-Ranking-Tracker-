@@ -133,13 +133,10 @@ def update_source_batches(sh, subgroup_size: int = SUBGROUP_SIZE):
             unique_cids.append(cid)
             seen.add(cid)
 
-    # ── Sort by Add value desc → assign batch numbers ─────────────────────────
-    sorted_cids = sorted(unique_cids,
-                         key=lambda c: add_values.get(c, 0.0),
-                         reverse=True)
-
+    # ── Assign batch numbers by Source row order (first 50 = batch 1, etc.) ─
+    # unique_cids is already in Source first-seen order — no sorting needed.
     batch_map: dict[str, int] = {}
-    for idx, cid in enumerate(sorted_cids):
+    for idx, cid in enumerate(unique_cids):
         batch_map[cid] = (idx // subgroup_size) + 1
 
     total_batches = max(batch_map.values()) if batch_map else 0
