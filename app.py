@@ -353,8 +353,60 @@ def api_run_pipeline():
     def generate():
         try:
             yield sse_event("▶  Starting full pipeline …")
-            cmd = [PYTHON_EXE, os.path.join(BASE_DIR, "run_pipeline.py")]
-            yield from stream_subprocess(cmd, proc_key="pipeline")
+            cmd = [PYTHON_EXE, "-u", os.path.join(BASE_DIR, "run_pipeline.py")]
+
+            # Write output to log file AND stream to UI.
+            # The subprocess runs in its own session (setsid) so it survives
+            # even if the PythonAnywhere web worker is recycled mid-run.
+            log_f = open(PIPELINE_LOG, "a", buffering=1)
+            env   = os.environ.copy()
+            env["PYTHONUNBUFFERED"] = "1"
+            proc  = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                cwd=BASE_DIR, env=env, text=True, bufsize=1,
+                preexec_fn=os.setsid,
+            )
+            _procs["pipeline"] = proc
+
+            import queue as _queue
+            line_q = _queue.Queue()
+
+            def _reader():
+                for line in proc.stdout:
+                    stripped = line.rstrip()
+                    log_f.write(stripped + "\n")
+                    log_f.flush()
+                    line_q.put(stripped)
+                line_q.put(None)
+
+            threading.Thread(target=_reader, daemon=True).start()
+
+            while True:
+                try:
+                    item = line_q.get(timeout=30)
+                except _queue.Empty:
+                    yield ": heartbeat\n\n"
+                    continue
+                if item is None:
+                    break
+                yield sse_event(item)
+
+            proc.wait()
+            log_f.close()
+            _procs["pipeline"] = None
+
+            if proc.returncode in (0, 2):
+                yield sse_event("", event="done")
+            elif proc.returncode in (-15, -9):
+                yield sse_event("⛔ Terminated by user.", event="done")
+            else:
+                yield sse_event(f"Process exited with code {proc.returncode}", event="error")
+
+        except GeneratorExit:
+            # Web worker dropped the connection — subprocess keeps running.
+            # Logs continue writing to PIPELINE_LOG.
+            log.info("SSE client disconnected — pipeline subprocess continues in background.")
         finally:
             _running["pipeline"] = False
 
