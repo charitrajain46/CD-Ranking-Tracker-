@@ -40,6 +40,12 @@ jobs:
       - name: Run pipeline
         run: python run_pipeline.py
 
+      - name: Save updated pipeline state back to secret
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: gh secret set PIPELINE_STATE < pipeline_state.json
+
       - name: Send email notification with result URL
         if: always()   # Send email whether pipeline succeeded or failed
         uses: dawidd6/action-send-mail@v3
