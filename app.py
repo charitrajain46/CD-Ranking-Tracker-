@@ -419,6 +419,40 @@ def api_terminate():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  ROUTES — Sheet GIDs  (so the UI can embed the right tab via iframe)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/sheet-gids")
+def api_sheet_gids():
+    """Return the numeric GID for the Final and Quick Run Final sheets."""
+    try:
+        import gspread
+        from google.oauth2.credentials import Credentials
+        token_file = os.path.join(BASE_DIR, "token.json")
+        if not os.path.exists(token_file):
+            return jsonify({"error": "token.json not found"}), 500
+        SCOPES = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive.file",
+        ]
+        creds = Credentials.from_authorized_user_file(token_file, SCOPES)
+        gc    = gspread.authorize(creds)
+        state = load_state()
+        sh    = gc.open_by_key(state["spreadsheet_id"])
+        gids  = {}
+        for ws in sh.worksheets():
+            if ws.title in ("Final", "Quick Run Final"):
+                gids[ws.title] = ws.id
+        return jsonify({
+            "spreadsheet_id": state.get("spreadsheet_id", ""),
+            "gids": gids,
+        })
+    except Exception as e:
+        log.warning(f"api_sheet_gids: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  ROUTES — Rankings Data  (source = pipeline | quickrun)
 # ══════════════════════════════════════════════════════════════════════════════
 
