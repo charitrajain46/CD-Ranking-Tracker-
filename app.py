@@ -206,7 +206,15 @@ def sse_event(data: str, event: str = "message") -> str:
 def stream_subprocess(cmd: list, stdin_data: str = None, cwd: str = None,
                        proc_key: str = None):
     """Stream a subprocess as SSE events.  If proc_key is given ('pipeline' or
-    'quickrun') the Popen handle is stored in _procs so it can be terminated."""
+    'quickrun') the Popen handle is stored in _procs so it can be terminated.
+
+    A background reader thread feeds lines into a queue; the generator drains
+    the queue with a 30-second timeout and emits SSE comment heartbeats while
+    idle.  This keeps PythonAnywhere / reverse-proxy connections alive during
+    long silent phases (e.g. the ~5.5-min Apps Script API call in Stage 2).
+    """
+    import queue as _queue
+
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
 
@@ -230,8 +238,26 @@ def stream_subprocess(cmd: list, stdin_data: str = None, cwd: str = None,
                 pass
         threading.Thread(target=feed, daemon=True).start()
 
-    for line in proc.stdout:
-        yield sse_event(line.rstrip())
+    # Read stdout in a background thread so we can heartbeat while it's silent
+    line_q = _queue.Queue()
+
+    def _reader():
+        for line in proc.stdout:
+            line_q.put(line.rstrip())
+        line_q.put(None)   # sentinel — subprocess finished writing
+
+    threading.Thread(target=_reader, daemon=True).start()
+
+    while True:
+        try:
+            item = line_q.get(timeout=30)
+        except _queue.Empty:
+            # No output for 30 s — send an SSE comment to keep the connection alive
+            yield ": heartbeat\n\n"
+            continue
+        if item is None:
+            break
+        yield sse_event(item)
 
     proc.wait()
     if proc_key:

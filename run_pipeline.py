@@ -51,7 +51,7 @@ After these 5 steps, run:  python run_pipeline.py
 ══════════════════════════════════════════════════════════════
 """
 
-import os, sys, json, time, subprocess, socket, atexit, smtplib
+import os, sys, json, time, subprocess, socket, atexit, smtplib, threading
 from email.mime.text import MIMEText
 from datetime import datetime, date, timedelta
 
@@ -234,7 +234,22 @@ def invoke_apps_script(script_service, script_id: str) -> bool:
     Call checkRanksBatched() via the Apps Script Execution API.
     Returns True if the call succeeded (even if more rows remain),
     False if the API returned an error.
+
+    A keepalive thread prints a progress line every 25 s while the blocking
+    HTTP call is in-flight.  This prevents SSE connections (via the web UI)
+    from going silent for >5 min and being closed by PythonAnywhere / proxies.
     """
+    _stop = threading.Event()
+
+    def _keepalive():
+        elapsed = 0
+        while not _stop.wait(25):
+            elapsed += 25
+            print(f"  … Apps Script still running ({elapsed}s elapsed) …", flush=True)
+
+    ka_thread = threading.Thread(target=_keepalive, daemon=True)
+    ka_thread.start()
+
     try:
         response = script_service.scripts().run(
             scriptId=script_id,
@@ -243,6 +258,9 @@ def invoke_apps_script(script_service, script_id: str) -> bool:
                 "devMode":  False,
             }
         ).execute()
+    finally:
+        _stop.set()
+        ka_thread.join(timeout=1)
 
         if response.get("error"):
             err = response["error"]

@@ -8,6 +8,7 @@ on:
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
+    timeout-minutes: 390   # hard cap ~6.5 h — prevents infinite hangs
 
     steps:
       - name: Checkout repo
