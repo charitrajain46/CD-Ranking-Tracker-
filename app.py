@@ -351,59 +351,91 @@ def api_run_pipeline():
         _running["pipeline"] = True
 
     def generate():
+        proc_started = False
         try:
             yield sse_event("▶  Starting full pipeline …")
             cmd = [PYTHON_EXE, "-u", os.path.join(BASE_DIR, "run_pipeline.py")]
-
-            # Write output to log file AND stream to UI.
-            # The subprocess runs in its own session (setsid) so it survives
-            # even if the PythonAnywhere web worker is recycled mid-run.
-            log_f = open(PIPELINE_LOG, "a", buffering=1)
-            env   = os.environ.copy()
+            env = os.environ.copy()
             env["PYTHONUNBUFFERED"] = "1"
+
+            # Note the current log file size so we tail only new output.
+            try:
+                log_pos = os.path.getsize(PIPELINE_LOG)
+            except OSError:
+                log_pos = 0
+
+            # ── Key fix: redirect subprocess stdout DIRECTLY to the log file. ──
+            # Previously we used stdout=PIPE and a reader thread.  When
+            # PythonAnywhere kills the HTTP worker at ~5 min the pipe's read end
+            # closes, SIGPIPE is sent to run_pipeline.py and it dies before
+            # starting round 2.  Writing straight to a file means the subprocess
+            # is completely immune to HTTP / SSE timeouts and will run all rounds.
+            log_f = open(PIPELINE_LOG, "a", buffering=1)
             proc  = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                cwd=BASE_DIR, env=env, text=True, bufsize=1,
+                stdout=log_f, stderr=log_f,
+                cwd=BASE_DIR, env=env,
                 preexec_fn=os.setsid,
+                close_fds=True,
             )
+            log_f.close()   # close our copy; subprocess keeps its own fd
             _procs["pipeline"] = proc
+            proc_started = True
 
-            import queue as _queue
-            line_q = _queue.Queue()
+            # Watcher thread: clears flags when the process truly exits
+            def _proc_watcher():
+                proc.wait()
+                with _lock:
+                    _procs["pipeline"] = None
+                    _running["pipeline"] = False
+                log.info(f"Pipeline subprocess exited (rc={proc.returncode})")
+            threading.Thread(target=_proc_watcher, name="pipeline-watcher",
+                             daemon=True).start()
 
-            def _reader():
-                for line in proc.stdout:
-                    stripped = line.rstrip()
-                    log_f.write(stripped + "\n")
-                    log_f.flush()
-                    line_q.put(stripped)
-                line_q.put(None)
-
-            threading.Thread(target=_reader, daemon=True).start()
-
-            while True:
+            # Tail log file and stream new lines as SSE events
+            last_activity = time.time()
+            while proc.poll() is None:
                 try:
-                    item = line_q.get(timeout=30)
-                except _queue.Empty:
-                    try:
-                        yield ": heartbeat\n\n"
-                    except (OSError, BrokenPipeError):
-                        log.info("SSE heartbeat: client disconnected — pipeline keeps running.")
-                        break
-                    continue
-                if item is None:
-                    break
-                try:
-                    yield sse_event(item)
-                except (OSError, BrokenPipeError):
-                    # Browser tab closed — subprocess keeps running in background.
-                    log.info("SSE write error: client disconnected — pipeline keeps running.")
-                    break
+                    with open(PIPELINE_LOG, "rb") as f:
+                        f.seek(log_pos)
+                        chunk = f.read(65536)
+                    if chunk:
+                        log_pos += len(chunk)
+                        last_activity = time.time()
+                        for line in chunk.decode("utf-8", errors="replace").splitlines():
+                            if line.strip():
+                                try:
+                                    yield sse_event(line)
+                                except (OSError, BrokenPipeError):
+                                    log.info("SSE write: client disconnected — pipeline keeps running.")
+                                    return
+                    else:
+                        # No new data — heartbeat if idle ≥ 25 s
+                        if time.time() - last_activity >= 25:
+                            try:
+                                yield ": heartbeat\n\n"
+                                last_activity = time.time()
+                            except (OSError, BrokenPipeError):
+                                log.info("SSE heartbeat: client disconnected — pipeline keeps running.")
+                                return
+                        time.sleep(1)
+                except (OSError, BrokenPipeError, GeneratorExit):
+                    log.info("SSE client disconnected — pipeline keeps running in background.")
+                    return
 
-            proc.wait()
-            log_f.close()
-            _procs["pipeline"] = None
+            # Drain any remaining output after process exits
+            try:
+                with open(PIPELINE_LOG, "rb") as f:
+                    f.seek(log_pos)
+                    tail = f.read()
+                for line in tail.decode("utf-8", errors="replace").splitlines():
+                    if line.strip():
+                        try:
+                            yield sse_event(line)
+                        except (OSError, BrokenPipeError):
+                            return
+            except OSError:
+                pass
 
             if proc.returncode in (0, 2):
                 try:
@@ -422,10 +454,12 @@ def api_run_pipeline():
                     pass
 
         except (GeneratorExit, OSError, BrokenPipeError):
-            # Browser disconnected — subprocess keeps running in background.
             log.info("SSE client disconnected — pipeline subprocess continues in background.")
         finally:
-            _running["pipeline"] = False
+            # Only clear flags here if Popen never started (startup error).
+            # If proc_started=True, _proc_watcher thread clears flags on exit.
+            if not proc_started:
+                _running["pipeline"] = False
 
     return Response(stream_with_context(generate()), mimetype="text/event-stream",
                     headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
