@@ -258,9 +258,6 @@ def invoke_apps_script(script_service, script_id: str) -> bool:
                 "devMode":  False,
             }
         ).execute()
-    finally:
-        _stop.set()
-        ka_thread.join(timeout=1)
 
         if response.get("error"):
             err = response["error"]
@@ -289,6 +286,10 @@ def invoke_apps_script(script_service, script_id: str) -> bool:
     except Exception as e:
         print(f"\n  ✗ Unexpected error calling Apps Script: {e}")
         return False
+
+    finally:
+        _stop.set()
+        ka_thread.join(timeout=1)
 
 
 def run_stage2(script_service, script_id: str, inter_ws: gspread.Worksheet) -> bool:
