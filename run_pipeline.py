@@ -512,11 +512,14 @@ def check_final_sheet(gc, spreadsheet_id: str, run_number: int = 1) -> tuple:
         ("partial", summary_string)  — some rows still missing ranks
         ("failed",  summary_string)  — sheet empty or all ranks missing
     """
-    # Compute 0-based rank column indices for this run
-    # run 1 → [5, 7, 9, 11, 13, 15]
-    # run 2 → [18, 20, 22, 24, 26, 28]  etc.
+    # Compute 0-based rank column indices for this run.
+    # Only check the 5 mandatory silos — Single_Course (offset 10) is optional:
+    # not every college has a specialization keyword, so that column is
+    # legitimately empty and should not count against the pass/fail result.
+    # run 1 → [5, 7, 9, 11, 13]   (Admissions, Fees, Placements, Scholarships, Main)
+    # run 2 → [18, 20, 22, 24, 26]  etc.
     run_start_0idx   = 5 + (run_number - 1) * 13
-    rank_col_indices = [run_start_0idx + i * 2 for i in range(6)]
+    rank_col_indices = [run_start_0idx + i * 2 for i in range(5)]
 
     try:
         sh       = gc.open_by_key(spreadsheet_id)
