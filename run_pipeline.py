@@ -53,7 +53,7 @@ After these 5 steps, run:  python run_pipeline.py
 
 import os, sys, json, time, subprocess, socket, atexit, smtplib, threading
 from email.mime.text import MIMEText
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 
 import gspread
 from google.oauth2.credentials       import Credentials
@@ -64,6 +64,12 @@ from googleapiclient.errors          import HttpError
 
 # Apps Script runs for up to 6 minutes — set global socket timeout to 8 minutes
 socket.setdefaulttimeout(480)
+
+# IST = UTC+5:30
+_IST = timezone(timedelta(hours=5, minutes=30))
+def now_ist() -> datetime:
+    """Return current time in IST (works correctly on UTC servers like PythonAnywhere)."""
+    return datetime.now(timezone.utc).astimezone(_IST)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -321,7 +327,20 @@ def run_stage2(script_service, script_id: str, inter_ws: gspread.Worksheet) -> b
             return True
 
         if unranked_after >= unranked:
-            print(f"\n  ⚠ No progress in round {round_num}.")
+            # The HTTP connection may have dropped (PythonAnywhere 5-min timeout) while
+            # Apps Script was still running asynchronously on Google's servers.
+            # Wait one full Apps Script cycle (6 min) then recheck before giving up.
+            print(f"\n  ⚠ No progress detected yet — waiting 6 min for async Apps Script …")
+            time.sleep(360)
+            unranked_retry = count_unranked_rows(inter_ws)
+            print(f"  Retry check: {unranked} → {unranked_retry} unranked rows")
+            if unranked_retry == 0:
+                print(f"\n  ✓ All rows ranked (Apps Script completed asynchronously)!")
+                return True
+            if unranked_retry < unranked:
+                print(f"\n  Progress detected after wait — continuing …")
+                continue
+            print(f"\n  ✗ Confirmed no progress after retry.")
             print("  Check Apps Script logs: Extensions → Apps Script → Executions")
             return False
 
@@ -427,11 +446,11 @@ def send_pipeline_email(state: dict, status: str, elapsed_str: str, spreadsheet_
 
     icon      = "✅" if status == "success" else ("⏭" if status == "skipped" else "❌")
     sheet_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit?usp=sharing"
-    subject   = f"Pipeline Run {icon} {status.capitalize()} — {datetime.now().strftime('%Y-%m-%d %H:%M IST')}"
+    subject   = f"Pipeline Run {icon} {status.capitalize()} — {now_ist().strftime('%d-%m-%Y %H:%M IST')}"
     body      = f"""Pipeline run completed.
 
 Status   : {status}
-Run date : {datetime.now().strftime('%Y-%m-%d %H:%M IST')}
+Run date : {now_ist().strftime('%d-%m-%Y %H:%M IST')}
 Duration : {elapsed_str}
 
 📊 View ranking results in Google Sheet:
@@ -467,7 +486,7 @@ def main():
     start_time     = datetime.now()
     final_status   = "failed"    # updated to "success" or "skipped" on clean exit
     spreadsheet_id = ""
-    banner(f"Collegedunia Rank Pipeline — FULL RUN  ({start_time.strftime('%Y-%m-%d %H:%M')})")
+    banner(f"Collegedunia Rank Pipeline — FULL RUN  ({now_ist().strftime('%d-%m-%Y %H:%M IST')})")
 
     # ── Load & validate ───────────────────────────────────────
     state = load_state()
@@ -509,7 +528,7 @@ def main():
             elapsed = datetime.now() - start_time
             elapsed_str = f"{int(elapsed.total_seconds() // 60)}m {int(elapsed.total_seconds() % 60)}s"
             banner(f"✓ PIPELINE SKIPPED — Nothing to rank today  ({elapsed_str})")
-            print(f"  Finished at: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+            print(f"  Finished at: {now_ist().strftime('%d-%m-%Y %H:%M IST')}")
             print()
             final_status = "skipped"
             send_pipeline_email(state, "skipped", elapsed_str, spreadsheet_id)
@@ -542,7 +561,7 @@ def main():
 
         banner(f"✓ PIPELINE COMPLETE  (took {elapsed_str})")
         print(f"  Spreadsheet: https://docs.google.com/spreadsheets/d/{spreadsheet_id}")
-        print(f"  Finished at: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        print(f"  Finished at: {now_ist().strftime('%d-%m-%Y %H:%M IST')}")
         print()
         final_status = "success"
 
