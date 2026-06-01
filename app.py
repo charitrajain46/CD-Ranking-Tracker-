@@ -9,7 +9,7 @@ Start:
 Then open:  http://localhost:5050
 """
 
-import os, sys, json, csv, time, threading, subprocess, smtplib, logging
+import os, sys, json, csv, time, threading, subprocess, smtplib, logging, shutil
 from datetime import datetime, date, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text      import MIMEText
@@ -32,6 +32,88 @@ logging.basicConfig(
     ]
 )
 log = logging.getLogger("ui")
+
+# ── Python executable (safe for PythonAnywhere where sys.executable = uwsgi) ─
+def _find_python() -> str:
+    """Return a Python interpreter that can import gspread.
+
+    On PythonAnywhere the web app runs under uwsgi, so sys.executable is
+    the uwsgi binary, not Python.  This function:
+      1. Tries sys.executable first (works on local dev / GitHub Actions).
+      2. Searches the user's virtualenvs (PythonAnywhere virtualenv setup).
+      3. Tries known absolute Python paths on PythonAnywhere.
+      4. Falls back to PATH search.
+    Each candidate is tested with a quick `import gspread` to confirm it has
+    the right packages installed.
+    """
+    def _test(path: str) -> bool:
+        """Return True if 'path' is a Python executable that has gspread."""
+        try:
+            r = subprocess.run(
+                [path, "-c", "import gspread"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=10
+            )
+            return r.returncode == 0
+        except Exception:
+            return False
+
+    def _is_python(path: str) -> bool:
+        return bool(path) and "python" in os.path.basename(path).lower()
+
+    candidates = []
+
+    # 1. sys.executable (real Python on local/CI; uwsgi on PythonAnywhere)
+    exe = sys.executable or ""
+    if _is_python(exe):
+        candidates.append(exe)
+
+    # 2. Virtualenvs (PythonAnywhere web apps often use a venv)
+    home = os.path.expanduser("~")
+    for venv_root in [
+        os.path.join(home, ".virtualenvs"),
+        os.path.join(home, "venv"),
+        os.path.join(home, "envs"),
+    ]:
+        if os.path.isdir(venv_root):
+            for venv_name in sorted(os.listdir(venv_root)):
+                for py in ("python3.11", "python3", "python"):
+                    p = os.path.join(venv_root, venv_name, "bin", py)
+                    if os.path.isfile(p) and p not in candidates:
+                        candidates.append(p)
+
+    # 3. Known absolute paths on PythonAnywhere (no PATH lookup needed)
+    for p in (
+        "/usr/bin/python3.11",
+        "/usr/bin/python3.10",
+        "/usr/bin/python3.9",
+        "/usr/bin/python3",
+        "/usr/local/bin/python3.11",
+        "/usr/local/bin/python3",
+    ):
+        if p not in candidates:
+            candidates.append(p)
+
+    # 4. PATH-based search
+    for name in ("python3.11", "python3.10", "python3.9", "python3", "python"):
+        found = shutil.which(name)
+        if found and found not in candidates:
+            candidates.append(found)
+
+    # Test each candidate; return the first that has gspread
+    for candidate in candidates:
+        if not os.path.isfile(candidate):
+            continue
+        if _test(candidate):
+            log.info(f"PYTHON_EXE resolved to: {candidate}")
+            return candidate
+
+    # Last resort: return sys.executable even if gspread test failed
+    fallback = exe if _is_python(exe) else (shutil.which("python3") or "python3")
+    log.warning(f"Could not find Python with gspread — falling back to: {fallback}")
+    return fallback
+
+PYTHON_EXE = _find_python()
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 BASE_DIR        = os.path.dirname(os.path.abspath(__file__))
@@ -160,6 +242,29 @@ def index():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  ROUTES — Debug
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/debug")
+def api_debug():
+    """Diagnostic endpoint — shows which Python will be used for subprocesses."""
+    gspread_ok = False
+    try:
+        import gspread as _gs  # noqa
+        gspread_ok = True
+    except ImportError:
+        pass
+
+    return jsonify({
+        "sys_executable": sys.executable,
+        "sys_version":    sys.version,
+        "PYTHON_EXE":     PYTHON_EXE,
+        "gspread_importable_in_webprocess": gspread_ok,
+        "BASE_DIR":       BASE_DIR,
+    })
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  ROUTES — Status
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -209,7 +314,7 @@ def api_run_pipeline():
     def generate():
         try:
             yield sse_event("▶  Starting full pipeline …")
-            cmd = [sys.executable, os.path.join(BASE_DIR, "run_pipeline.py")]
+            cmd = [PYTHON_EXE, os.path.join(BASE_DIR, "run_pipeline.py")]
             yield from stream_subprocess(cmd)
         finally:
             _running["pipeline"] = False
@@ -246,7 +351,7 @@ def api_quick_run():
     def generate():
         try:
             yield sse_event(f"▶  Starting Quick Run ({mode}: {value}) …")
-            cmd = [sys.executable, os.path.join(BASE_DIR, "quick_run.py")]
+            cmd = [PYTHON_EXE, os.path.join(BASE_DIR, "quick_run.py")]
             yield from stream_subprocess(cmd, stdin_data=stdin_str)
         finally:
             _running["quickrun"] = False
@@ -1496,7 +1601,7 @@ def _midnight_pipeline_run():
     if can_run:
         def _worker():
             try:
-                cmd = [sys.executable, os.path.join(BASE_DIR, "run_pipeline.py")]
+                cmd = [PYTHON_EXE, os.path.join(BASE_DIR, "run_pipeline.py")]
                 env = os.environ.copy()
                 env["PYTHONUNBUFFERED"] = "1"
                 with open(PIPELINE_LOG, "a") as lf:
