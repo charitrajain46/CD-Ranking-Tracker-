@@ -594,12 +594,13 @@ def _load_email_config(state: dict) -> dict:
     ]
 
     cfg = {
-        "smtp_host":     "smtp.gmail.com",
-        "smtp_port":     465,
-        "smtp_user":     "",
-        "smtp_password": "",
-        "smtp_from":     "",
-        "to_list":       FIXED_RECIPIENTS,   # always send to these
+        "smtp_host":        "smtp.gmail.com",
+        "smtp_port":        465,
+        "smtp_user":        "",
+        "smtp_password":    "",
+        "smtp_from":        "",
+        "to_list":          FIXED_RECIPIENTS,   # always send to these
+        "sendgrid_api_key": "",                 # fallback when SMTP is blocked
     }
 
     # 1. Try ui_config.json (set via the Email & Distribution tab in the UI)
@@ -612,6 +613,7 @@ def _load_email_config(state: dict) -> dict:
             if ui.get("smtp_user"):   cfg["smtp_user"]      = ui["smtp_user"]
             if ui.get("smtp_password"): cfg["smtp_password"]= ui["smtp_password"]
             if ui.get("smtp_from"):   cfg["smtp_from"]      = ui["smtp_from"]
+            if ui.get("sendgrid_api_key"): cfg["sendgrid_api_key"] = ui["sendgrid_api_key"]
             recs = ui.get("recipients", [])
             if recs:
                 extra = [r["email"] for r in recs if r.get("email")]
@@ -630,6 +632,29 @@ def _load_email_config(state: dict) -> dict:
     cfg["to_list"] = list(dict.fromkeys(FIXED_RECIPIENTS + cfg["to_list"]))
 
     return cfg
+
+
+def _send_via_sendgrid(to_list: list, subject: str, body: str, from_email: str, api_key: str) -> None:
+    """Send email via SendGrid HTTP API — works on PythonAnywhere free tier (no SMTP needed)."""
+    import urllib.request, urllib.error
+    payload = json.dumps({
+        "personalizations": [{"to": [{"email": addr} for addr in to_list]}],
+        "from":             {"email": from_email},
+        "subject":          subject,
+        "content":          [{"type": "text/plain", "value": body}],
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.sendgrid.com/v3/mail/send",
+        data    = payload,
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type":  "application/json",
+        },
+        method  = "POST",
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        if resp.status not in (200, 202):
+            raise RuntimeError(f"SendGrid returned HTTP {resp.status}")
 
 
 def send_pipeline_email(state: dict, status: str, elapsed_str: str, spreadsheet_id: str) -> None:
@@ -683,6 +708,21 @@ Duration : {elapsed_str}
 
         print(f"  ✓ Email sent → {', '.join(cfg['to_list'])}")
     except Exception as e:
+        err_str = str(e)
+        # PythonAnywhere free tier blocks SMTP (Errno 101 / Network unreachable)
+        # → fall back to SendGrid HTTP API which is always allowed
+        if "101" in err_str or "unreachable" in err_str.lower() or "connect" in err_str.lower():
+            sg_key = cfg.get("sendgrid_api_key", "")
+            if sg_key:
+                try:
+                    from_addr = cfg["smtp_from"] or cfg["smtp_user"]
+                    _send_via_sendgrid(cfg["to_list"], subject, body, from_addr, sg_key)
+                    print(f"  ✓ Email sent via SendGrid → {', '.join(cfg['to_list'])}")
+                    return
+                except Exception as sg_err:
+                    print(f"  ⚠ SendGrid fallback also failed: {sg_err}")
+            else:
+                print("  ⚠ SMTP blocked (Errno 101). Add 'sendgrid_api_key' to ui_config.json to enable SendGrid fallback.")
         print(f"  ⚠ Email failed: {e}")
 
 
