@@ -1775,6 +1775,84 @@ def api_send_email():
     return jsonify({"message": f"Report ({fmt_label}) sent to {len(recipients)} recipient(s)."})
 
 
+@app.route("/api/email/send-one", methods=["POST"])
+def api_send_email_one():
+    """Send report to a single recipient by email address."""
+    body      = request.get_json(force=True, silent=True) or {}
+    period    = body.get("period", "daily")
+    fmt       = body.get("format", "pdf").lower()
+    to_email  = (body.get("to_email") or "").strip()
+
+    if not to_email:
+        return jsonify({"error": "No recipient email provided."}), 400
+
+    cfg = load_ui_config()
+    if not cfg.get("smtp_host"):
+        return jsonify({"error": "SMTP not configured. Set it in the Email tab."}), 400
+
+    try:
+        report = _build_report_data(period)
+        if fmt == "csv":
+            file_buf   = _generate_report_csv(report)
+            file_bytes = file_buf.read()
+            mime_main  = "text"; mime_sub = "csv"
+            fname      = f"ranking_report_{period}_{date.today().isoformat()}.csv"
+            fmt_label  = "CSV"
+        else:
+            file_buf   = _generate_report_pdf(report)
+            file_bytes = file_buf.read()
+            mime_main  = "application"; mime_sub = "pdf"
+            fname      = f"ranking_report_{period}_{date.today().isoformat()}.pdf"
+            fmt_label  = "PDF"
+    except Exception as e:
+        return jsonify({"error": f"Could not generate {fmt.upper()}: {e}"}), 500
+
+    subject = f"Collegedunia Ranking Report — {period.capitalize()} ({date.today().isoformat()})"
+    body_html = f"""
+    <html><body style="font-family:sans-serif;color:#333;max-width:600px;">
+    <div style="background:#4f72fb;padding:20px;border-radius:10px 10px 0 0;">
+      <h2 style="color:white;margin:0;">Collegedunia Ranking Pipeline</h2>
+      <p style="color:#c7d2fe;margin:4px 0 0;">{period.capitalize()} Report ({fmt_label})</p>
+    </div>
+    <div style="background:#f8f9ff;padding:20px;border:1px solid #e0e4ff;border-top:none;border-radius:0 0 10px 10px;">
+      <table cellpadding="8" cellspacing="0" style="width:100%;border-collapse:collapse;">
+        <tr style="background:#4f72fb;color:white;"><th>Metric</th><th>Value</th></tr>
+        <tr style="background:#f0f2ff;"><td>Generated At</td><td>{report['generated_at']}</td></tr>
+        <tr><td>Run Number</td><td>{report.get('run_number','—')}</td></tr>
+        <tr style="background:#f0f2ff;"><td>Total Colleges</td><td>{report.get('total_colleges', 0)}</td></tr>
+        <tr><td>Total Keywords</td><td>{report.get('total_keywords', 0)}</td></tr>
+        <tr style="background:#f0f2ff;"><td>Ranking Gain</td><td><b style="color:#10b981;">{report.get('ranking_gain', 0)}</b></td></tr>
+        <tr><td>Ranking Dropped</td><td>{report.get('ranking_dropped', 0)}</td></tr>
+      </table>
+      <p style="margin-top:16px;font-size:12px;color:#888;">
+        Full details are in the attached {fmt_label}. Sent by Collegedunia Ranking Pipeline UI.
+      </p>
+    </div>
+    </body></html>
+    """
+
+    try:
+        msg = MIMEMultipart("mixed")
+        msg["Subject"] = subject
+        msg["From"]    = cfg.get("smtp_from") or cfg.get("smtp_user")
+        msg["To"]      = to_email
+        msg.attach(MIMEText(body_html, "html"))
+        part = MIMEBase(mime_main, mime_sub)
+        part.set_payload(file_bytes)
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", f'attachment; filename="{fname}"')
+        msg.attach(part)
+        with smtplib.SMTP(cfg["smtp_host"], int(cfg.get("smtp_port", 587))) as srv:
+            srv.ehlo(); srv.starttls()
+            srv.login(cfg["smtp_user"], cfg["smtp_password"])
+            srv.sendmail(msg["From"], to_email, msg.as_string())
+        log.info(f"Email sent ({fmt_label}) -> {to_email}")
+        return jsonify({"message": f"Report ({fmt_label}) sent to {to_email}."})
+    except Exception as e:
+        log.warning(f"Email failed -> {to_email}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  ROUTES — Logs
 # ══════════════════════════════════════════════════════════════════════════════

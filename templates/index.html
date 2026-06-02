@@ -1055,6 +1055,22 @@ hr { border:none; border-top:1px solid var(--border); margin:16px 0; }
           </div>
         </div>
         <p style="font-size:12px;color:var(--muted);">Report is generated in the chosen format and emailed to all recipients above.</p>
+
+        <!-- Send to one person -->
+        <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;"/>
+        <div class="form-row" style="align-items:flex-end;">
+          <div class="form-group" style="flex:2;">
+            <label>Send to One Person</label>
+            <select id="send-one-email">
+              <option value="">— select recipient —</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>&nbsp;</label>
+            <button class="btn btn-primary" onclick="sendToOne()">📨 Send to Selected</button>
+          </div>
+        </div>
+        <p style="font-size:12px;color:var(--muted);">Sends the report only to the selected person. Uses the same period &amp; format selected above.</p>
       </div>
     </div>
 
@@ -1815,13 +1831,21 @@ function renderChips(list) {
   var el = document.getElementById('chip-list');
   if (!list.length) {
     el.innerHTML = '<span style="color:var(--muted);font-size:12px;">No recipients added yet.</span>';
-    return;
+  } else {
+    el.innerHTML = list.map(r =>
+      '<span class="chip"><b>' + esc(r.name||'') + '</b>' +
+      (r.name ? ' ' : '') + '<em>&lt;' + esc(r.email) + '&gt;</em>' +
+      '<span class="chip-del" onclick="removeRecipient(\'' + esc(r.email) + '\')">×</span></span>'
+    ).join('');
   }
-  el.innerHTML = list.map(r =>
-    '<span class="chip"><b>' + esc(r.name||'') + '</b>' +
-    (r.name ? ' ' : '') + '<em>&lt;' + esc(r.email) + '&gt;</em>' +
-    '<span class="chip-del" onclick="removeRecipient(\'' + esc(r.email) + '\')">×</span></span>'
-  ).join('');
+  // Also refresh the "Send to One" dropdown
+  var sel = document.getElementById('send-one-email');
+  if (sel) {
+    sel.innerHTML = '<option value="">— select recipient —</option>' +
+      list.map(r => '<option value="' + esc(r.email) + '">' +
+        (r.name ? esc(r.name) + ' &lt;' + esc(r.email) + '&gt;' : esc(r.email)) +
+        '</option>').join('');
+  }
 }
 
 function addRecipient() {
@@ -1911,7 +1935,24 @@ function sendReport() {
     body: JSON.stringify({period: period, format: fmt})
   }).then(function(r) { return r.json(); }).then(function(d) {
     if (d.error) {
-      // Show the real SMTP / generation error directly
+      toast(d.error, 'error');
+    } else {
+      toast(d.message || 'Report sent!', 'success');
+    }
+  }).catch(function(e) { toast('Error: ' + e.message, 'error'); });
+}
+
+function sendToOne() {
+  var toEmail = document.getElementById('send-one-email').value;
+  if (!toEmail) { toast('Please select a recipient first.', 'error'); return; }
+  var period  = document.getElementById('send-period').value;
+  var fmt     = document.getElementById('send-format').value;
+  toast('Sending ' + period + ' report to ' + toEmail + '… please wait.', 'info');
+  fetch('/api/email/send-one', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({period: period, format: fmt, to_email: toEmail})
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.error) {
       toast(d.error, 'error');
     } else {
       toast(d.message || 'Report sent!', 'success');
