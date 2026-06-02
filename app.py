@@ -1795,13 +1795,16 @@ def api_logs():
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _secs_until_midnight() -> float:
-    now = datetime.now()
-    nxt = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    """Seconds until next midnight IST (UTC+5:30) — works correctly on UTC servers."""
+    from datetime import timezone as _tz
+    _IST = _tz(timedelta(hours=5, minutes=30))
+    now  = datetime.now(_tz.utc).astimezone(_IST)
+    nxt  = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     return max((nxt - now).total_seconds(), 1.0)
 
 
 def _midnight_pipeline_run():
-    """Fires at midnight: runs run_pipeline.py, then reschedules for next midnight."""
+    """Fires at midnight IST: runs run_pipeline.py, then reschedules for next midnight."""
     global _next_auto_run
     log.info("Midnight auto-run: Full Pipeline starting")
     can_run = False
@@ -1852,8 +1855,10 @@ def _schedule_midnight_run():
     global _next_auto_run, _midnight_timer
     if _midnight_timer and _midnight_timer.is_alive():
         _midnight_timer.cancel()
+    from datetime import timezone as _tz
+    _IST = _tz(timedelta(hours=5, minutes=30))
     secs = _secs_until_midnight()
-    nxt  = (datetime.now() + timedelta(days=1)).replace(
+    nxt  = (datetime.now(_tz.utc).astimezone(_IST) + timedelta(days=1)).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
     _next_auto_run  = nxt.isoformat()
