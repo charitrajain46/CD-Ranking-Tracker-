@@ -742,15 +742,6 @@ def main():
     state = load_state()
     validate_state(state)
 
-    # ── Block manual runs when sheets already have data ───────
-    if not is_auto and state.get("sheets_have_data"):
-        banner("⏭  MANUAL RUN BLOCKED — Sheets already have data")
-        print("  The pipeline ran successfully and sheets already contain ranking data.")
-        print("  Clear the Intermediate and Final sheets first, then click Reset in")
-        print("  the dashboard before running manually again.")
-        print()
-        sys.exit(0)
-
     script_id      = state["script_id"]
     spreadsheet_id = state["spreadsheet_id"]
 
@@ -776,6 +767,18 @@ def main():
         except gspread.exceptions.WorksheetNotFound:
             print("ERROR: 'Intermediate' tab not found — re-run setup.py.")
             sys.exit(1)
+
+        # ── Block manual runs when Intermediate sheet already has data ──
+        if not is_auto:
+            all_rows = inter_ws.get_all_values()
+            data_rows = [r for r in all_rows[1:] if any(c.strip() for c in r)]
+            if data_rows:
+                banner("⏭  MANUAL RUN BLOCKED — Sheets already have data")
+                print("  The Intermediate sheet still has data from the last run.")
+                print("  Clear the Intermediate and Final sheets in Google Sheets first,")
+                print("  then run the pipeline again.")
+                print()
+                sys.exit(0)
 
         # ── Build Apps Script API service (socket timeout = 8 min) ──
         script_service = build("script", "v1", credentials=creds)
@@ -861,16 +864,6 @@ def main():
         if final_status != "skipped":
             send_pipeline_email(state, final_status, elapsed_str, spreadsheet_id)
 
-        # ── Mark sheets as populated after a real run ─────────────
-        if final_status in ("passed", "partial"):
-            try:
-                with open(STATE_FILE) as _f:
-                    _s = json.load(_f)
-                _s["sheets_have_data"] = True
-                with open(STATE_FILE, "w") as _f:
-                    json.dump(_s, _f, indent=2)
-            except Exception:
-                pass
 
 
 if __name__ == "__main__":
