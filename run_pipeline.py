@@ -734,11 +734,22 @@ def main():
     start_time     = datetime.now()
     final_status   = "failed"    # updated to "success" or "skipped" on clean exit
     spreadsheet_id = ""
+    is_auto        = "--auto" in sys.argv   # midnight scheduler passes this flag
+
     banner(f"Collegedunia Rank Pipeline — FULL RUN  ({now_ist().strftime('%d-%m-%Y %H:%M IST')})")
 
     # ── Load & validate ───────────────────────────────────────
     state = load_state()
     validate_state(state)
+
+    # ── Block manual runs when sheets already have data ───────
+    if not is_auto and state.get("sheets_have_data"):
+        banner("⏭  MANUAL RUN BLOCKED — Sheets already have data")
+        print("  The pipeline ran successfully and sheets already contain ranking data.")
+        print("  Clear the Intermediate and Final sheets first, then click Reset in")
+        print("  the dashboard before running manually again.")
+        print()
+        sys.exit(0)
 
     script_id      = state["script_id"]
     spreadsheet_id = state["spreadsheet_id"]
@@ -849,6 +860,17 @@ def main():
         # Only send if not already sent for "skipped" path above
         if final_status != "skipped":
             send_pipeline_email(state, final_status, elapsed_str, spreadsheet_id)
+
+        # ── Mark sheets as populated after a real run ─────────────
+        if final_status in ("passed", "partial"):
+            try:
+                with open(STATE_FILE) as _f:
+                    _s = json.load(_f)
+                _s["sheets_have_data"] = True
+                with open(STATE_FILE, "w") as _f:
+                    json.dump(_s, _f, indent=2)
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

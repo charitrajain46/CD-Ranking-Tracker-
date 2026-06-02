@@ -1816,7 +1816,7 @@ def _midnight_pipeline_run():
     if can_run:
         def _worker():
             try:
-                cmd = [PYTHON_EXE, os.path.join(BASE_DIR, "run_pipeline.py")]
+                cmd = [PYTHON_EXE, os.path.join(BASE_DIR, "run_pipeline.py"), "--auto"]
                 env = os.environ.copy()
                 env["PYTHONUNBUFFERED"] = "1"
                 with open(PIPELINE_LOG, "a") as lf:
@@ -1848,6 +1848,21 @@ def _midnight_pipeline_run():
 
     # Always reschedule for tomorrow midnight
     _schedule_midnight_run()
+
+
+@app.route("/api/reset-sheets-flag", methods=["POST"])
+def api_reset_sheets_flag():
+    """Clear sheets_have_data flag so manual runs are allowed again.
+    Call this after manually clearing the Intermediate and Final sheets."""
+    try:
+        with open(STATE_FILE) as f:
+            state = json.load(f)
+        state["sheets_have_data"] = False
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f, indent=2)
+        return jsonify({"ok": True, "message": "Reset done — manual runs are now allowed."})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 def _schedule_midnight_run():
