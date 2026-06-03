@@ -657,7 +657,8 @@ def _send_via_sendgrid(to_list: list, subject: str, body: str, from_email: str, 
             raise RuntimeError(f"SendGrid returned HTTP {resp.status}")
 
 
-def send_pipeline_email(state: dict, status: str, elapsed_str: str, spreadsheet_id: str) -> None:
+def send_pipeline_email(state: dict, status: str, elapsed_str: str, spreadsheet_id: str,
+                        reason: str = "") -> None:
     """Send email notification after pipeline run — always called regardless of outcome."""
     # Reload state from disk (phase1 may have updated it during the run)
     try:
@@ -676,13 +677,26 @@ def send_pipeline_email(state: dict, status: str, elapsed_str: str, spreadsheet_
         print("  ⚠ No email recipients configured — skipping notification.")
         return
 
-    icon      = {"passed": "✅", "skipped": "⏭", "partial": "⚠️"}.get(status, "❌")
+    # "skipped" means nothing to rank — pipeline ran fine, treat as Passed
+    email_status = "passed" if status == "skipped" else status
+
+    # Default reasons if none provided
+    if not reason:
+        reason = {
+            "passed":  "All rows ranked successfully.",
+            "skipped": "Pipeline ran successfully. No new rankings to generate today — all colleges are within the 15-day cycle.",
+            "partial": "Pipeline completed but some rows could not be ranked (marked NOT_FOUND).",
+            "failed":  "Pipeline encountered an error and could not complete successfully.",
+        }.get(status, "")
+
+    icon      = {"passed": "✅", "partial": "⚠️"}.get(email_status, "❌")
     sheet_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit?usp=sharing"
-    label     = {"passed": "Passed", "skipped": "Skipped", "partial": "Partial", "failed": "Failed"}.get(status, status.capitalize())
+    label     = {"passed": "Passed", "partial": "Partial", "failed": "Failed"}.get(email_status, email_status.capitalize())
     subject   = f"Pipeline Run {icon} {label} — {now_ist().strftime('%d-%m-%Y %H:%M IST')}"
     body      = f"""Pipeline run completed.
 
-Status   : {status}
+Status   : {label}
+Reason   : {reason}
 Run date : {now_ist().strftime('%d-%m-%Y %H:%M IST')}
 Duration : {elapsed_str}
 
@@ -734,6 +748,7 @@ def main():
     start_time     = datetime.now()
     final_status   = "failed"    # updated to "success" or "skipped" on clean exit
     spreadsheet_id = ""
+    sheet_summary  = ""          # filled after Final sheet quality check
     is_auto        = "--auto" in sys.argv   # midnight scheduler passes this flag
 
     banner(f"Collegedunia Rank Pipeline — FULL RUN  ({now_ist().strftime('%d-%m-%Y %H:%M IST')})")
@@ -793,7 +808,9 @@ def main():
             print(f"  Finished at: {now_ist().strftime('%d-%m-%Y %H:%M IST')}")
             print()
             final_status = "skipped"
-            send_pipeline_email(state, "skipped", elapsed_str, spreadsheet_id)
+            send_pipeline_email(state, "skipped", elapsed_str, spreadsheet_id,
+                reason="Pipeline ran successfully. No new rankings to generate today — "
+                       "all colleges are within the 15-day cycle. Next run scheduled automatically.")
             sys.exit(0)
         if not ok:
             print("\nPipeline aborted at Stage 1.")
@@ -860,9 +877,13 @@ def main():
         # ── Always send email (success / skipped / failed) ────────
         elapsed = datetime.now() - start_time
         elapsed_str = f"{int(elapsed.total_seconds() // 60)}m {int(elapsed.total_seconds() % 60)}s"
-        # Only send if not already sent for "skipped" path above
         if final_status != "skipped":
-            send_pipeline_email(state, final_status, elapsed_str, spreadsheet_id)
+            _reason = {
+                "passed":  f"All rows ranked successfully. {sheet_summary}".strip(),
+                "partial": f"Pipeline completed but some rows could not be ranked. {sheet_summary}".strip(),
+                "failed":  "Pipeline encountered an error and could not complete. Check Live Logs for details.",
+            }.get(final_status, "")
+            send_pipeline_email(state, final_status, elapsed_str, spreadsheet_id, reason=_reason)
 
 
 
