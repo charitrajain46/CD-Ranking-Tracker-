@@ -69,9 +69,8 @@ def gspread_call(fn, *args, retries=5, **kwargs):
 CREDENTIALS_FILE   = "credentials.json"
 TOKEN_FILE         = "token.json"
 STATE_FILE         = "pipeline_state.json"
-CSV_FILE           = "Colleges_Short_Form.csv"
 
-MAX_DAILY_COLLEGES = 550    # max college-course pairs ranked per day
+MAX_DAILY_COLLEGES = 550    # max colleges ranked per day
 SUBGROUP_SIZE      = 50     # Source batch size for 40% selection
 SAMPLE_RATIO       = 0.40   # pick top 40% from each sub-batch
 CYCLE_DAYS         = 15     # re-rank every N days
@@ -87,8 +86,10 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive.file",
 ]
 
+# New Intermediate layout (7 cols):
+#   A=college_id  B=short_form  C=city  D=keyword  E=Rank  F=Found URL  G=updated_at
 INTER_HEADER = [
-    "college_id", "course_id", "college_name", "course_name",
+    "college_id", "short_form", "city",
     "keyword", "Rank", "Found URL", "updated_at",
 ]
 
@@ -102,8 +103,9 @@ SILO_RUN_COLS = [
     "Updated_at",
 ]
 
+# New Final layout: 3 fixed cols (College_Id, Short_form, Keywords) + silo cols
 FINAL_BASE_HEADER = [
-    "College_Id", "Course_Id", "College_Name", "Course_Name", "Keywords",
+    "College_Id", "Short_form", "Keywords",
 ] + SILO_RUN_COLS
 
 
@@ -140,7 +142,7 @@ def _flex(row_dict, *keys):
     return ""
 
 
-def make_contiguous_ranges(row_numbers, col_start="F", col_end="H"):
+def make_contiguous_ranges(row_numbers, col_start="E", col_end="G"):
     """
     Convert a list of sheet row numbers into minimal range strings.
     e.g. [2,3,4,7,8] → ["F2:H4", "F7:H8"]
@@ -204,34 +206,7 @@ def validate_sheet_ids(state):
         sys.exit(EXIT_ERROR)
 
 
-# ══════════════════════════════════════════════════════════════
-#  COLLEGE SHORT FORMS  (CSV)
-# ══════════════════════════════════════════════════════════════
-
-def load_college_short_forms():
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), CSV_FILE)
-    if not os.path.exists(path):
-        print(f"  WARNING: '{CSV_FILE}' not found — using name fallback.")
-        return {}
-    for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
-        try:
-            mapping = {}
-            with open(path, newline="", encoding=encoding) as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    cid   = str(row.get("College Id", "") or row.get("college_id", "")).strip()
-                    short = str(row.get("Short_form",  "") or row.get("short_form",  "")).strip()
-                    if cid and short:
-                        mapping[cid] = short
-            print(f"  Loaded {len(mapping)} college short forms.")
-            return mapping
-        except UnicodeDecodeError:
-            continue
-        except Exception as e:
-            print(f"  WARNING: Could not read CSV ({e}) — using name fallback.")
-            return {}
-    print(f"  WARNING: Could not decode '{CSV_FILE}' — using name fallback.")
-    return {}
+# (short_form is now read directly from the Source sheet — no CSV needed)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -324,13 +299,13 @@ def load_add_values(sh):
 def get_last_ranked_dates(data_rows):
     """
     Scan Intermediate data rows and return {college_id: last_ranked_date}.
-    Uses updated_at column (index 7 = col H).
+    Uses updated_at column (index 6 = col G in new 7-col layout).
     Only counts rows that have been actually ranked (updated_at not empty).
     """
     last_ranked = {}   # {college_id: date}
     for row in data_rows:
         cid     = str(row[0]).strip() if len(row) > 0 else ""
-        updated = str(row[7]).strip() if len(row) > 7 else ""
+        updated = str(row[6]).strip() if len(row) > 6 else ""
         if not cid or not updated:
             continue
         try:
@@ -355,7 +330,7 @@ def load_gs_state(sh):
       checkpoint_row    : int  — current position in Source (0-indexed data row)
       cycle_start_date  : str  — ISO date when current cycle started
       last_run_date     : str  — ISO date of last successful run
-      deferred_new_json : str  — JSON list of [[cid, course_id], ...] deferred new colleges
+      deferred_new_json : str  — JSON list of [cid, ...] deferred new colleges
     """
     try:
         ws = sh.worksheet(GS_STATE_SHEET)
@@ -425,22 +400,20 @@ def extract_spec(name):
 #  KEYWORD ROW BUILDER
 # ══════════════════════════════════════════════════════════════
 
-def build_keyword_rows(college_id, course_id, college_name_full, course_name_full,
-                       c_short, crs_short, spec):
-    base  = " ".join(p for p in [c_short.strip(), crs_short.strip()] if p)
-    base  = " ".join(base.split())   # collapse any internal double-spaces
-    blank = ["", "", ""]
+def build_keyword_rows(college_id, short_form, city):
+    """Build 5 keyword rows for Intermediate using short_form directly.
+    New Intermediate layout (7 cols):
+      college_id | short_form | city | keyword | Rank | Found URL | updated_at
+    """
+    sf    = short_form.strip()
+    blank = ["", "", ""]   # Rank, Found URL, updated_at — filled by Apps Script
     rows  = [
-        [college_id, course_id, college_name_full, course_name_full, base]                   + blank,
-        [college_id, course_id, college_name_full, course_name_full, f"{base} Admissions"]   + blank,
-        [college_id, course_id, college_name_full, course_name_full, f"{base} Fees"]         + blank,
-        [college_id, course_id, college_name_full, course_name_full, f"{base} Placements"]   + blank,
-        [college_id, course_id, college_name_full, course_name_full, f"{base} Scholarships"] + blank,
+        [college_id, sf, city, sf]                         + blank,
+        [college_id, sf, city, f"{sf} Admissions"]         + blank,
+        [college_id, sf, city, f"{sf} Fees"]               + blank,
+        [college_id, sf, city, f"{sf} Placements"]         + blank,
+        [college_id, sf, city, f"{sf} Scholarships"]       + blank,
     ]
-    if spec:
-        rows.append(
-            [college_id, course_id, college_name_full, course_name_full, f"{base} ({spec})"] + blank
-        )
     return rows
 
 
@@ -558,55 +531,11 @@ def show_already_ran_message(today_str, last_run_str=None):
         except ValueError:
             pass
 
-    print(f"  Tonight's auto-run : 12:00 AM tomorrow"
-          f"  ({hours}h {minutes}m from now)")
     print(f"\n  To force re-run today: edit '{STATE_FILE}'")
     print(f"  and change 'phase1_last_run' to yesterday's date.")
 
 
-# ══════════════════════════════════════════════════════════════
-#  MIDNIGHT CRON SETUP
-# ══════════════════════════════════════════════════════════════
-
-def ensure_midnight_cron():
-    """
-    Add a daily midnight cron entry for this pipeline if not already present.
-    Uses a unique tag comment to detect duplicates.
-    Safe to call on every run — only writes crontab once.
-    """
-    tag = "# article-ranking-pipeline-auto"
-    try:
-        script_dir  = os.path.dirname(os.path.abspath(__file__))
-        python_path = sys.executable
-        log_path    = os.path.join(script_dir, "pipeline.log")
-
-        # Check existing crontab
-        result   = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
-        existing = result.stdout if result.returncode == 0 else ""
-
-        if tag in existing:
-            print("  ✓ Midnight cron already set up — no change needed.")
-            return
-
-        cron_line = (
-            f"0 0 * * *  cd {script_dir} && "
-            f"{python_path} run_pipeline.py >> {log_path} 2>&1  {tag}"
-        )
-        new_crontab = existing.rstrip("\n") + "\n" + cron_line + "\n"
-        subprocess.run(["crontab", "-"], input=new_crontab, text=True, check=True)
-
-        print("  ✓ Daily midnight cron job created.")
-        print(f"    Schedule  : 0 0 * * *  (every day at 12:00 AM)")
-        print(f"    Log file  : {log_path}")
-
-    except Exception as e:
-        script_dir  = os.path.dirname(os.path.abspath(__file__))
-        python_path = sys.executable
-        print(f"  WARNING: Could not write crontab automatically ({e}).")
-        print(f"  Set it up manually — run:  crontab -e")
-        print(f"  Then add this line:")
-        print(f"    0 0 * * *  cd {script_dir} && "
-              f"{python_path} run_pipeline.py >> pipeline.log 2>&1  {tag}")
+# (Auto-run cron removed — pipeline is manual-only. Run via the UI.)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -617,24 +546,20 @@ def main():
     today = date.today()
 
     # ── [0] Load & clean state ────────────────────────────────
-    print("\n[0/6] Loading pipeline state …")
+    print("\n[0/5] Loading pipeline state …")
     state = load_state()
     validate_sheet_ids(state)
     # Remove all legacy fields from old batch system
     for old_key in ("batches", "next_batch_to_rank", "locked_source_ids"):
         state.pop(old_key, None)
 
-    # ── [1] College short forms ───────────────────────────────
-    print("\n[1/6] Loading college short forms …")
-    college_short_forms = load_college_short_forms()
-
-    # ── [2] Authenticate + open sheets ───────────────────────
-    print("\n[2/6] Authenticating …")
+    # ── [1] Authenticate + open sheets ───────────────────────
+    print("\n[1/5] Authenticating …")
     creds = get_credentials()
     gc    = gspread.authorize(creds)
     print("  ✓ Authenticated")
 
-    print("\n[3/6] Opening spreadsheet and tabs …")
+    print("\n[2/5] Opening spreadsheet and tabs …")
     try:
         sh = gc.open_by_key(state["spreadsheet_id"])
         print(f"  Spreadsheet → '{sh.title}'")
@@ -688,7 +613,7 @@ def main():
             sys.exit(EXIT_NOTHING_TODAY)
 
     # ── [3] Read all sheets ───────────────────────────────────
-    print("\n[4/6] Reading all sheets …")
+    print("\n[3/5] Reading all sheets …")
 
     # Source
     src_raw = src_ws.get_all_values()
@@ -727,7 +652,7 @@ def main():
     final_all = final_ws.get_all_values() if final_ws else []
 
     # ── [4] Deletion sync ─────────────────────────────────────
-    print("\n[5/6] Syncing deletions …")
+    print("\n[4/5] Syncing deletions …")
 
     deleted_cids = inter_cids - all_source_cids
     if deleted_cids:
@@ -741,7 +666,7 @@ def main():
         print("  No deletions needed.")
 
     # ── [5] Checkpoint + batch selection ──────────────────────
-    print("\n[6/6] Batch selection …")
+    print("\n[5/5] Batch selection …")
 
     # Load Add values from Content (used to rank colleges within each batch)
     add_values = load_add_values(sh)
@@ -846,31 +771,30 @@ def main():
         else:
             print(f"\n  Next batch due     : in {CYCLE_DAYS} days (no ranking dates found)")
 
-        print(f"  Tonight's auto-run : 12:00 AM tomorrow  ({hours}h {minutes}m from now)")
-
         state["phase1_last_run"] = today.isoformat()
         save_state(state)
-        print("\n  Setting up midnight auto-run …")
-        ensure_midnight_cron()
         sys.exit(EXIT_NOTHING_TODAY)
 
     # ── Determine run number + Final column group ─────────────
+    # Final has 3 fixed cols (College_Id, Short_form, Keywords) then 13 cols per run.
     current_run = 1
     if final_ws is not None and final_all:
         fh        = final_all[0] if final_all else []
         non_empty = [h for h in fh if str(h).strip()]
-        n_groups  = max(0, (len(non_empty) - 5) // 13)
+        n_groups  = max(0, (len(non_empty) - 3) // 13)
         if n_groups == 0:
             current_run = 1
         else:
-            last_upd_idx    = 5 + n_groups * 13 - 1
+            last_upd_idx    = 3 + n_groups * 13 - 1
             last_group_used = any(
                 last_upd_idx < len(r) and str(r[last_upd_idx]).strip()
                 for r in final_all[1:]
             )
             current_run = n_groups + 1 if last_group_used else n_groups
 
-    run_start_col = 5 + (current_run - 1) * 13 + 1
+    # run_start_col: first silo column (1-based) for this run in Final
+    # Run 1 → col 4 (D), Run 2 → col 17, etc.
+    run_start_col = 3 + (current_run - 1) * 13 + 1
     print(f"\n  Run #{current_run}  |  Final column group: "
           f"{col_letter(run_start_col)}–{col_letter(run_start_col + 12)}")
 
@@ -891,28 +815,15 @@ def main():
 
     # ── Append keyword rows for newly selected colleges ───────
     new_inter_rows = []
-    no_csv_miss    = 0
 
     for cid, rec in selected:
         if cid not in new_cids:
             continue   # existing college — ranks cleared above
-        college_id   = cid
-        course_id    = _flex(rec, "course_id",    "Course_Id",   "Course_ID")
-        college_name = _flex(rec, "college_name", "College_Name")
-        course_name  = _flex(rec, "course_name",  "Course_Name")
+        college_id = cid
+        short_form = _flex(rec, "short_form", "Short_form", "Short_Form", "SHORT_FORM")
+        city       = _flex(rec, "city",       "City",       "CITY")
 
-        if college_id in college_short_forms:
-            c_short = college_short_forms[college_id]
-        else:
-            c_short     = extract_college_short_fallback(college_name)
-            no_csv_miss += 1
-
-        new_inter_rows.extend(build_keyword_rows(
-            college_id, course_id, college_name, course_name,
-            c_short,
-            extract_course_short(course_name),
-            extract_spec(course_name),
-        ))
+        new_inter_rows.extend(build_keyword_rows(college_id, short_form, city))
 
     if new_inter_rows:
         if not has_header:
@@ -947,7 +858,7 @@ def main():
         # Extend header for this run (run 2+)
         elif current_run > 1:
             final_header_row = final_ws.row_values(1)
-            expected_cols    = 5 + (current_run - 1) * 13
+            expected_cols    = 3 + (current_run - 1) * 13
             while len(final_header_row) < expected_cols:
                 final_header_row.append("")
             final_header_row = final_header_row[:expected_cols] + SILO_RUN_COLS
@@ -958,37 +869,29 @@ def main():
 
         # Add Final identity rows for colleges selected for ranking today
         fresh_final  = final_ws.get_all_values()
-        final_pairs  = set(
-            (str(r[0]).strip(), str(r[1]).strip())
+        final_cids   = set(
+            str(r[0]).strip()
             for i, r in enumerate(fresh_final)
-            if i > 0 and len(r) >= 2
+            if i > 0 and r and str(r[0]).strip()
         )
-        seen_pairs   = set()
-        final_new    = []
+        seen_new_cids = set()
+        final_new     = []
 
         for cid, rec in selected:
             if cid not in new_cids:
                 continue   # existing college already has a Final row
-            college_id   = cid
-            course_id    = _flex(rec, "course_id",    "Course_Id",   "Course_ID")
-            college_name = _flex(rec, "college_name", "College_Name")
-            course_name  = _flex(rec, "course_name",  "Course_Name")
-            pair         = (college_id, course_id)
+            college_id = cid
+            short_form = _flex(rec, "short_form", "Short_form", "Short_Form", "SHORT_FORM")
 
-            if pair in final_pairs or pair in seen_pairs:
+            if college_id in final_cids or college_id in seen_new_cids:
                 continue
-            seen_pairs.add(pair)
+            seen_new_cids.add(college_id)
 
-            if college_id in college_short_forms:
-                c_short = college_short_forms[college_id]
-            else:
-                c_short = extract_college_short_fallback(college_name)
-            _crs_s  = extract_course_short(course_name).strip()
-            keyword = " ".join(p for p in [c_short.strip(), _crs_s] if p)
-            keyword = " ".join(keyword.split())
-
+            # keyword = short_form itself (the main/base keyword)
+            keyword = short_form.strip()
+            # Final row: College_Id | Short_form | Keywords | (empty silo cols)
             final_new.append(
-                [college_id, course_id, college_name, course_name, keyword]
+                [college_id, short_form, keyword]
                 + [""] * (current_run * 13)
             )
 
@@ -997,49 +900,6 @@ def main():
             print(f"  {len(final_new)} new identity rows added to Final.")
         else:
             print("  Final already up to date — no new rows needed.")
-
-        # ── Add deferred new colleges to Final with Scheduled marker ──
-        if unselected_new:
-            tomorrow_str = (today + timedelta(days=1)).isoformat()
-            fresh_final2 = final_ws.get_all_values()
-            final_pairs2 = set(
-                (str(r[0]).strip(), str(r[1]).strip())
-                for idx, r in enumerate(fresh_final2)
-                if idx > 0 and len(r) >= 2
-            )
-            seen_deferred = set()
-            deferred_rows = []
-
-            for cid_d, rec_d in unselected_new:
-                college_id   = cid_d
-                course_id    = _flex(rec_d, "course_id",    "Course_Id",   "Course_ID")
-                college_name = _flex(rec_d, "college_name", "College_Name")
-                course_name  = _flex(rec_d, "course_name",  "Course_Name")
-                pair_d       = (college_id, course_id)
-
-                if pair_d in final_pairs2 or pair_d in seen_deferred:
-                    continue
-                seen_deferred.add(pair_d)
-
-                if college_id in college_short_forms:
-                    c_short = college_short_forms[college_id]
-                else:
-                    c_short = extract_college_short_fallback(college_name)
-                _crs_s  = extract_course_short(course_name).strip()
-                keyword = " ".join(p for p in [c_short.strip(), _crs_s] if p)
-                keyword = " ".join(keyword.split())
-
-                # Build row: identity + padding up to run_start_col, then scheduled note
-                sched_row  = [college_id, course_id, college_name, course_name, keyword]
-                pad_needed = (run_start_col - 1) - len(sched_row)   # cols before first silo col
-                sched_row += [""] * max(0, pad_needed)
-                sched_row.append(f"Scheduled: {tomorrow_str}")
-                deferred_rows.append(sched_row)
-
-            if deferred_rows:
-                final_ws.append_rows(deferred_rows, value_input_option="USER_ENTERED")
-                print(f"  {len(deferred_rows)} deferred new colleges added to Final "
-                      f"(Scheduled: {tomorrow_str}).")
 
         # Write run_start_col to Source!Z1 for Apps Script
         if src_ws.col_count < 26:
@@ -1052,10 +912,6 @@ def main():
     state["phase1_last_run"] = today.isoformat()
     save_state(state)
 
-    # ── Set up midnight cron ──────────────────────────────────
-    print("\n  Setting up midnight auto-run …")
-    ensure_midnight_cron()
-
     # ── Summary ───────────────────────────────────────────────
     total_inter = len(data_rows) + len(new_inter_rows)
     print(f"\n{'─'*60}")
@@ -1064,12 +920,8 @@ def main():
     print(f"  Due pool               : {len(all_due)} colleges")
     print(f"  Selected for ranking   : {len(selected)}"
           f"  ({len(selected_re)} re-rank + {len(selected_new)} new)")
-    print(f"  Deferred to tomorrow   : {len(unselected_new)} (new, queued)")
     print(f"  Checkpoint             : after college {last_processed_cid} ({total_src} / {total_src} processed)")
-    if no_csv_miss:
-        print(f"  CSV short-form misses  : {no_csv_miss}")
     print(f"  Intermediate total rows: {total_inter}")
-    print(f"  Next auto-run          : tomorrow 12:00 AM (cron)")
     print(f"{'─'*60}")
     print(f"\n  Done! Apps Script will rank {total_inter} Intermediate rows.")
 

@@ -2,22 +2,22 @@
 // Collegedunia SERP Rank Checker — Multi-Run Edition
 // ============================================================
 // Each pipeline run adds a new 13-column group to Final:
-//   Run 1: cols F–R   (run_start_col = 6)
-//   Run 2: cols S–AE  (run_start_col = 19)
-//   Run 3: cols AF–AR (run_start_col = 32)  … and so on
+//   Run 1: cols D–P   (run_start_col = 4)
+//   Run 2: cols Q–AC  (run_start_col = 17)
+//   Run 3: cols AD–AP (run_start_col = 30)  … and so on
 //
 // phase1_populate.py writes run_start_col into Source!Z1 before
 // each run. Apps Script reads it here — so it always writes to
 // the correct column group without any manual change needed.
 //
-// Intermediate tab (never changes):
-//   A=college_id  B=course_id  C=college_name  D=course_name
-//   E=keyword  F=Rank  G=Found URL  H=updated_at
+// Intermediate tab (7 cols, never changes):
+//   A=college_id  B=short_form  C=city
+//   D=keyword  E=Rank  F=Found URL  G=updated_at
 //
 // Final tab grows rightward each run:
-//   A–E  fixed identity cols (College_Id … Keywords)
-//   F–R  Run 1 silo data (Admissions … Updated_at)
-//   S–AE Run 2 silo data
+//   A–C  fixed identity cols (College_Id, Short_form, Keywords)
+//   D–P  Run 1 silo data (Admissions … Updated_at)
+//   Q–AC Run 2 silo data
 //   …
 // ============================================================
 
@@ -32,38 +32,38 @@ const SOURCE_TAB  = "Source";
 const CONTENT_TAB = "Content";
 
 // ─── Intermediate column positions (1-based) ─────────────────
-const I_COLLEGE_ID   = 1;   // A
-const I_COURSE_ID    = 2;   // B
-const I_COLLEGE_NAME = 3;   // C
-const I_COURSE_NAME  = 4;   // D
-const I_KEYWORD      = 5;   // E
-const I_RANK         = 6;   // F
-const I_URL          = 7;   // G
-const I_TIME         = 8;   // H
+const I_COLLEGE_ID  = 1;   // A
+const I_SHORT_FORM  = 2;   // B
+const I_CITY        = 3;   // C
+const I_KEYWORD     = 4;   // D
+const I_RANK        = 5;   // E
+const I_URL         = 6;   // F
+const I_TIME        = 7;   // G
 
 // ─── Final tab: BASE silo → column positions for Run 1 (1-based) ─
-// For Run N, add offset = (run_start_col - 6) to each value.
+// Final has 3 fixed cols (A–C). Run 1 silo data starts at col D (4).
+// For Run N, add offset = (run_start_col - 4) to each value.
 const SILO_RANK_COL = {
-  "Admissions":     6,   // F (run 1)
-  "Fees":           8,   // H
-  "Placements":    10,   // J
-  "Scholarships":  12,   // L
-  "Main":          14,   // N
-  "Single_Course": 16,   // P
+  "Admissions":     4,   // D (run 1)
+  "Fees":           6,   // F
+  "Placements":     8,   // H
+  "Scholarships":  10,   // J
+  "Main":          12,   // L
+  "Single_Course": 14,   // N
 };
 const SILO_URL_COL = {
-  "Admissions":     7,   // G
-  "Fees":           9,   // I
-  "Placements":    11,   // K
-  "Scholarships":  13,   // M
-  "Main":          15,   // O
-  "Single_Course": 17,   // Q
+  "Admissions":     5,   // E
+  "Fees":           7,   // G
+  "Placements":     9,   // I
+  "Scholarships":  11,   // K
+  "Main":          13,   // M
+  "Single_Course": 15,   // O
 };
-const FINAL_UPDATED_COL = 18;   // R — Updated_at (run 1 base)
+const FINAL_UPDATED_COL = 16;   // P — Updated_at (run 1 base)
 
 // ─── Intermediate header ──────────────────────────────────────
 const INTER_HEADER = [
-  "college_id", "course_id", "college_name", "course_name",
+  "college_id", "short_form", "city",
   "keyword", "Rank", "Found URL", "updated_at",
 ];
 
@@ -89,20 +89,20 @@ const BATCH_SLEEP_MS = 500;
 /**
  * Returns the 1-based column number in Final where the CURRENT run's
  * silo data starts. Written by phase1_populate.py into Source!Z1.
- *   Run 1 → 6  (col F)
- *   Run 2 → 19 (col S)
- *   Run 3 → 32 (col AF)
+ *   Run 1 → 4  (col D)
+ *   Run 2 → 17 (col Q)
+ *   Run 3 → 30 (col AD)
  */
 function getRunStartCol() {
   try {
     var ss  = SpreadsheetApp.getActiveSpreadsheet();
     var src = ss.getSheetByName(SOURCE_TAB);
-    if (!src) return 6;
+    if (!src) return 4;
     var val = src.getRange("Z1").getValue();
     var n   = parseInt(val);
-    return (n > 0) ? n : 6;
+    return (n > 0) ? n : 4;
   } catch(e) {
-    return 6;   // default: first run
+    return 4;   // default: first run
   }
 }
 
@@ -169,8 +169,9 @@ function getFinalSheet() {
   const lastCol = sh.getLastColumn();
   const lastRow = sh.getLastRow();
   if (lastRow === 0 || lastCol === 0) {
+    // New layout: 3 fixed cols + 13 silo cols for Run 1
     const baseHeader = [
-      "College_Id","Course_Id","College_Name","Course_Name","Keywords",
+      "College_Id", "Short_form", "Keywords",
       "Admissions","Admissions_URL","Fees","Fees_URL",
       "Placements","Placements_URL","Scholarships","Scholarships_URL",
       "Main","Main_URL","Single_Course","Single_Course_URL","Updated_at",
@@ -197,7 +198,7 @@ function formatFinalHeader(sheet, numCols) {
   headerRange.setBackground("#4a86e8");
   headerRange.setFontColor("#ffffff");
   sheet.setFrozenRows(1);
-  sheet.setFrozenColumns(4);
+  sheet.setFrozenColumns(3);
 }
 
 
@@ -228,16 +229,16 @@ function ensureFinalColumnFormats(finalSheet, runStartCol) {
  * Called once per batch for fast targeted writes.
  */
 function buildFinalRowCache(finalSheet) {
+  // Key = college_id only (no course_id in new schema)
   const cache = {};
   try {
     const lastRow = finalSheet.getLastRow();
     if (lastRow <= 1) return cache;
-    const data = finalSheet.getRange(2, 1, lastRow - 1, 2).getValues();
+    const data = finalSheet.getRange(2, 1, lastRow - 1, 1).getValues();
     for (let i = 0; i < data.length; i++) {
       const colId = String(data[i][0]).trim();
-      const crsId = String(data[i][1]).trim();
-      if (colId && crsId) {
-        cache[colId + "|" + crsId] = i + 2;   // 1-based sheet row
+      if (colId) {
+        cache[colId] = i + 2;   // 1-based sheet row
       }
     }
   } catch(e) {
@@ -249,16 +250,15 @@ function buildFinalRowCache(finalSheet) {
 /**
  * Write one ranking result into the CURRENT RUN's column in Final.
  * runStartCol tells us which column group this run uses.
- *   Run 1: offset = 0  (writes to F, G, R …)
- *   Run 2: offset = 13 (writes to S, T, AE …)
+ *   Run 1: offset = 0  (writes to D, E, P …)
+ *   Run 2: offset = 13 (writes to Q, R, AC …)
  */
-function updateFinalCell(finalSheet, finalRowCache, colId, crsId, silo, rank, url, time, runStartCol) {
+function updateFinalCell(finalSheet, finalRowCache, colId, silo, rank, url, time, runStartCol) {
   if (!finalSheet || !finalRowCache) return;
-  const key      = colId + "|" + crsId;
-  const finalRow = finalRowCache[key];
-  if (!finalRow) return;   // pair not in Final yet
+  const finalRow = finalRowCache[colId];
+  if (!finalRow) return;   // college not in Final yet
 
-  const offset     = (runStartCol || 6) - 6;
+  const offset     = (runStartCol || 4) - 4;
   const rankCol    = SILO_RANK_COL[silo];
   const urlCol     = SILO_URL_COL[silo];
   if (!rankCol) return;   // unknown silo
@@ -321,10 +321,10 @@ function checkRanksBatched() {
     const q        = String(allData[i][I_KEYWORD - 1] || "").trim();
     const existing = allData[i][I_RANK - 1];
     const colId    = String(allData[i][I_COLLEGE_ID - 1] || "").trim();
-    const crsId    = String(allData[i][I_COURSE_ID  - 1] || "").trim();
+
     if (!q) continue;
     if (existing !== "" && existing !== null && String(existing).indexOf("ERROR") === -1) continue;
-    pending.push({ sheetRow: START_ROW + i, keyword: q, colId: colId, crsId: crsId });
+    pending.push({ sheetRow: START_ROW + i, keyword: q, colId: colId });
   }
 
   Logger.log("checkRanksBatched: " + pending.length + " rows to process in batches of " + BATCH_SIZE);
@@ -369,9 +369,9 @@ function checkRanksBatched() {
 
       const display = writeResult(sheet, item.sheetRow, item.keyword, result, timestamp);
 
-      if (finalSheet && finalRowCache && item.colId && item.crsId) {
+      if (finalSheet && finalRowCache && item.colId) {
         const silo = detectSilo(item.keyword);
-        updateFinalCell(finalSheet, finalRowCache, item.colId, item.crsId,
+        updateFinalCell(finalSheet, finalRowCache, item.colId,
                         silo, display, result.url || "", timestamp, runStartCol);
       }
 
@@ -424,7 +424,7 @@ function syncToFinal() {
     if (!interSheet) return;
 
     const runStartCol  = getRunStartCol();
-    const offset       = runStartCol - 6;
+    const offset       = runStartCol - 4;
     const finalSheet   = getFinalSheet();
     const finalRowCache = buildFinalRowCache(finalSheet);
     const lastInterRow = interSheet.getLastRow();
@@ -440,10 +440,10 @@ function syncToFinal() {
     const map = {};
     for (const row of interData) {
       const colId  = String(row[I_COLLEGE_ID   - 1]).trim();
-      const crsId  = String(row[I_COURSE_ID    - 1]).trim();
-      if (!colId && !crsId) continue;
 
-      const key = colId + "|" + crsId;
+      if (!colId) continue;
+
+      const key = colId;
       if (!map[key]) {
         map[key] = {
           Admissions: { rank: "", url: "" }, Fees:    { rank: "", url: "" },
@@ -501,8 +501,8 @@ function syncToFinal() {
 // ─── Colour-code rank columns for the current run group ──────
 function colorFinalRankCols(sheet, dataRows, runStartCol) {
   if (dataRows <= 0) return;
-  const offset   = (runStartCol || 6) - 6;
-  const rankCols = [6, 8, 10, 12, 14, 16].map(c => c + offset);
+  const offset   = (runStartCol || 4) - 4;
+  const rankCols = [4, 6, 8, 10, 12, 14].map(c => c + offset);
   for (const col of rankCols) {
     try {
       const vals = sheet.getRange(2, col, dataRows, 1).getValues();
@@ -647,9 +647,9 @@ function recheckNotFound() {
     const q     = String(allData[i][I_KEYWORD - 1] || "").trim();
     const rank  = String(allData[i][I_RANK    - 1] || "").trim();
     const colId = String(allData[i][I_COLLEGE_ID - 1] || "").trim();
-    const crsId = String(allData[i][I_COURSE_ID  - 1] || "").trim();
+
     if (!q || rank !== "Not in Top 50") continue;
-    pending.push({ sheetRow: START_ROW + i, keyword: q, colId: colId, crsId: crsId });
+    pending.push({ sheetRow: START_ROW + i, keyword: q, colId: colId });
   }
 
   let checked = 0, found = 0, errors = 0;
@@ -691,9 +691,9 @@ function recheckNotFound() {
 
       const display = writeResult(sheet, item.sheetRow, item.keyword, result, timestamp);
 
-      if (finalSheet && finalRowCache && item.colId && item.crsId) {
+      if (finalSheet && finalRowCache && item.colId) {
         const silo = detectSilo(item.keyword);
-        updateFinalCell(finalSheet, finalRowCache, item.colId, item.crsId,
+        updateFinalCell(finalSheet, finalRowCache, item.colId,
                         silo, display, result.url || "", timestamp, runStartCol);
       }
 
@@ -732,9 +732,9 @@ function recheckCleared() {
     const q        = String(allData[i][I_KEYWORD - 1] || "").trim();
     const existing = allData[i][I_RANK - 1];
     const colId    = String(allData[i][I_COLLEGE_ID - 1] || "").trim();
-    const crsId    = String(allData[i][I_COURSE_ID  - 1] || "").trim();
+
     if (!q || (existing !== "" && existing !== null)) continue;
-    pending.push({ sheetRow: START_ROW + i, keyword: q, colId: colId, crsId: crsId });
+    pending.push({ sheetRow: START_ROW + i, keyword: q, colId: colId });
   }
 
   let checked = 0, found = 0, errors = 0;
@@ -776,9 +776,9 @@ function recheckCleared() {
 
       const display = writeResult(sheet, item.sheetRow, item.keyword, result, timestamp);
 
-      if (finalSheet && finalRowCache && item.colId && item.crsId) {
+      if (finalSheet && finalRowCache && item.colId) {
         const silo = detectSilo(item.keyword);
-        updateFinalCell(finalSheet, finalRowCache, item.colId, item.crsId,
+        updateFinalCell(finalSheet, finalRowCache, item.colId,
                         silo, display, result.url || "", timestamp, runStartCol);
       }
 
@@ -869,9 +869,9 @@ function runAndWrite(sheet, row, question, finalSheet, finalRowCache, runStartCo
     // ── Live update of the Final tab (current run's column group) ──
     if (finalSheet && finalRowCache) {
       const colId = String(sheet.getRange(row, I_COLLEGE_ID).getValue()).trim();
-      const crsId = String(sheet.getRange(row, I_COURSE_ID).getValue()).trim();
+      
       const silo  = detectSilo(question);
-      updateFinalCell(finalSheet, finalRowCache, colId, crsId, silo, display, result.url || "", timestamp, runStartCol);
+      updateFinalCell(finalSheet, finalRowCache, colId, silo, display, result.url || "", timestamp, runStartCol);
     }
 
     SpreadsheetApp.flush();
@@ -885,10 +885,10 @@ function runAndWrite(sheet, row, question, finalSheet, finalRowCache, runStartCo
 
 
 /**
- * Same as runAndWrite but accepts pre-read colId/crsId to skip
- * 2 extra individual cell reads per row (saves ~50-80ms per row).
+ * Same as runAndWrite but accepts pre-read colId to skip
+ * 1 extra individual cell read per row (saves ~50-80ms per row).
  */
-function runAndWriteFast(sheet, row, question, colId, crsId, finalSheet, finalRowCache, runStartCol) {
+function runAndWriteFast(sheet, row, question, colId, finalSheet, finalRowCache, runStartCol) {
   try {
     const result  = serpSearch(question);
     const display = result.rank !== null
@@ -915,9 +915,9 @@ function runAndWriteFast(sheet, row, question, colId, crsId, finalSheet, finalRo
       cell.setBackground("#f2f2f2");
     }
 
-    if (finalSheet && finalRowCache && colId && crsId) {
+    if (finalSheet && finalRowCache && colId) {
       const silo = detectSilo(question);
-      updateFinalCell(finalSheet, finalRowCache, colId, crsId, silo, display, result.url || "", timestamp, runStartCol);
+      updateFinalCell(finalSheet, finalRowCache, colId, silo, display, result.url || "", timestamp, runStartCol);
     }
 
     SpreadsheetApp.flush();
@@ -1044,9 +1044,9 @@ function retryErrorRows(sheet, finalSheet, finalRowCache, runStartCol, startTime
     const rank  = String(allData[i][I_RANK    - 1] || "").trim();
     const q     = String(allData[i][I_KEYWORD - 1] || "").trim();
     const colId = String(allData[i][I_COLLEGE_ID - 1] || "").trim();
-    const crsId = String(allData[i][I_COURSE_ID  - 1] || "").trim();
+
     if (!q || rank.indexOf("ERROR") === -1) continue;
-    pending.push({ sheetRow: START_ROW + i, keyword: q, colId: colId, crsId: crsId });
+    pending.push({ sheetRow: START_ROW + i, keyword: q, colId: colId });
   }
 
   if (pending.length === 0) return { retried: 0, recovered: 0 };
@@ -1092,9 +1092,9 @@ function retryErrorRows(sheet, finalSheet, finalRowCache, runStartCol, startTime
       // Success — replace ERROR with real rank + URL + fresh timestamp
       const display = writeResult(sheet, item.sheetRow, item.keyword, result, timestamp);
 
-      if (finalSheet && finalRowCache && item.colId && item.crsId) {
+      if (finalSheet && finalRowCache && item.colId) {
         const silo = detectSilo(item.keyword);
-        updateFinalCell(finalSheet, finalRowCache, item.colId, item.crsId,
+        updateFinalCell(finalSheet, finalRowCache, item.colId,
                         silo, display, result.url || "", timestamp, runStartCol);
       }
 

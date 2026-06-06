@@ -1,9 +1,7 @@
-name: Run Pipeline Every 15 Days
+name: Run Pipeline (Manual Only)
 
 on:
-  schedule:
-    - cron: '30 18 * * *'   # Every day at midnight IST (18:30 UTC = 12:00 AM IST)
-  workflow_dispatch:          # Also allows manual trigger from GitHub UI
+  workflow_dispatch:   # Manual trigger only — no automatic schedule
 
 jobs:
   run-pipeline:

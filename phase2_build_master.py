@@ -20,7 +20,7 @@ Silo type is detected from the keyword itself (no silo_type column):
 Master sheet column layout
 ──────────────────────────
 Fixed (always present):
-  A college_id  B course_id  C college_name  D course_name  E base_keyword
+  A college_id  B short_form  C keywords
 
 Per-run group (13 cols, date-stamped):
   Admissions [DATE]   Admissions URL [DATE]
@@ -59,23 +59,23 @@ SCOPES = [
 ]
 
 MASTER_FIXED_HEADERS = [
-    "college_id", "course_id", "college_name", "course_name", "base_keyword",
+    "college_id", "short_form", "keywords",
 ]
-MASTER_FIXED_COUNT = 5
+MASTER_FIXED_COUNT = 3
 
 SILO_ORDER = [
     "Admissions", "Fees", "Placements", "Scholarships", "Main", "Single_Course",
 ]
 
-# Intermediate column indices (1-based) — 8 columns, no silo_type
-INTER_COLLEGE_ID_COL   = 1   # A
-INTER_COURSE_ID_COL    = 2   # B
-INTER_COLLEGE_NAME_COL = 3   # C
-INTER_COURSE_NAME_COL  = 4   # D
-INTER_KEYWORD_COL      = 5   # E
-INTER_RANK_COL         = 6   # F  ← cleared for next batch
-INTER_URL_COL          = 7   # G  ← cleared for next batch
-INTER_TIME_COL         = 8   # H  ← cleared for next batch
+# Intermediate column indices (1-based) — 7 columns, no silo_type
+#   A=college_id  B=short_form  C=city  D=keyword  E=Rank  F=Found URL  G=updated_at
+INTER_COLLEGE_ID_COL = 1   # A
+INTER_SHORT_FORM_COL = 2   # B
+INTER_CITY_COL       = 3   # C
+INTER_KEYWORD_COL    = 4   # D
+INTER_RANK_COL       = 5   # E  ← cleared for next batch
+INTER_URL_COL        = 6   # F  ← cleared for next batch
+INTER_TIME_COL       = 7   # G  ← cleared for next batch
 
 
 # ══════════════════════════════════════════════════════════════
@@ -196,13 +196,12 @@ def read_intermediate_for_batch(
         while len(row) < INTER_TIME_COL:
             row.append("")
 
-        cid      = str(row[INTER_COLLEGE_ID_COL   - 1]).strip()
-        csid     = str(row[INTER_COURSE_ID_COL    - 1]).strip()
-        cname    = str(row[INTER_COLLEGE_NAME_COL - 1]).strip()
-        crname   = str(row[INTER_COURSE_NAME_COL  - 1]).strip()
-        keyword  = str(row[INTER_KEYWORD_COL      - 1]).strip()
-        rank     = str(row[INTER_RANK_COL         - 1]).strip()
-        url      = str(row[INTER_URL_COL          - 1]).strip()
+        cid        = str(row[INTER_COLLEGE_ID_COL - 1]).strip()
+        short_form = str(row[INTER_SHORT_FORM_COL - 1]).strip()
+        city       = str(row[INTER_CITY_COL       - 1]).strip()
+        keyword    = str(row[INTER_KEYWORD_COL    - 1]).strip()
+        rank       = str(row[INTER_RANK_COL       - 1]).strip()
+        url        = str(row[INTER_URL_COL        - 1]).strip()
 
         if cid not in college_ids:
             continue
@@ -210,14 +209,13 @@ def read_intermediate_for_batch(
             continue
 
         results.append({
-            "college_id":   cid,
-            "course_id":    csid,
-            "college_name": cname,
-            "course_name":  crname,
-            "keyword":      keyword,
-            "rank":         rank,
-            "url":          url,
-            "silo_type":    detect_silo(keyword),   # derived from keyword
+            "college_id": cid,
+            "short_form": short_form,
+            "city":       city,
+            "keyword":    keyword,
+            "rank":       rank,
+            "url":        url,
+            "silo_type":  detect_silo(keyword),   # derived from keyword
         })
 
     return results
@@ -227,15 +225,15 @@ def read_intermediate_for_batch(
 #  GROUP BY COLLEGE-COURSE PAIR
 # ══════════════════════════════════════════════════════════════
 
-def group_by_pair(rows: list[dict]) -> dict[tuple, dict]:
-    grouped: dict[tuple, dict] = {}
+def group_by_pair(rows: list[dict]) -> dict[str, dict]:
+    """Group ranked rows by college_id (no course_id in new schema)."""
+    grouped: dict[str, dict] = {}
     for r in rows:
-        key = (r["college_id"], r["course_id"])
+        key = r["college_id"]
         if key not in grouped:
             grouped[key] = {
-                "college_name": r["college_name"],
-                "course_name":  r["course_name"],
-                "base_keyword": "",
+                "short_form":   r["short_form"],
+                "base_keyword": r["short_form"],   # keyword = short_form for Main
                 "silos":        {},
             }
         silo = r["silo_type"]
@@ -255,20 +253,18 @@ def get_master_index(master_ws: gspread.Worksheet):
         return {}, MASTER_FIXED_HEADERS[:], MASTER_FIXED_COUNT + 1
 
     header_row  = all_values[0]
-    pair_to_row = {}
+    cid_to_row  = {}   # {college_id: sheet_row_number (1-based)}
     for i, row in enumerate(all_values):
         if i == 0:
             continue
-        while len(row) < 2:
-            row.append("")
-        cid, csid = str(row[0]).strip(), str(row[1]).strip()
-        if cid and csid:
-            pair_to_row[(cid, csid)] = i + 1
+        cid = str(row[0]).strip() if row else ""
+        if cid:
+            cid_to_row[cid] = i + 1
 
     last_col = len(header_row)
     while last_col > 0 and not str(header_row[last_col - 1]).strip():
         last_col -= 1
-    return pair_to_row, header_row, last_col + 1
+    return cid_to_row, header_row, last_col + 1
 
 
 def build_column_headers(date_str: str) -> list[str]:
@@ -310,12 +306,12 @@ def clear_next_batch_in_intermediate(
         if cid not in next_college_ids:
             continue
         sheet_row = i + 1
-        ranges_to_clear.extend([f"F{sheet_row}", f"G{sheet_row}", f"H{sheet_row}"])
+        ranges_to_clear.extend([f"E{sheet_row}", f"F{sheet_row}", f"G{sheet_row}"])
 
     if ranges_to_clear:
         inter_ws.batch_clear(ranges_to_clear)
 
-    return len(ranges_to_clear) // 3
+    return len(ranges_to_clear) // 3   # E + F + G per row
 
 
 # ══════════════════════════════════════════════════════════════
@@ -397,7 +393,7 @@ def main() -> None:
     date_str    = date.today().isoformat()
     new_headers = build_column_headers(date_str)
 
-    pair_to_row, _, next_col = get_master_index(master_ws)
+    cid_to_row, _, next_col = get_master_index(master_ws)
 
     end_col   = next_col + len(new_headers) - 1
     hdr_range = f"{col_letter(next_col)}1:{col_letter(end_col)}1"
@@ -409,16 +405,17 @@ def main() -> None:
     rows_to_append = []
     cell_updates   = []
 
-    for (cid, csid), info in grouped.items():
+    for cid, info in grouped.items():
         silo_values = build_silo_values(info["silos"])
-        if (cid, csid) in pair_to_row:
-            master_row = pair_to_row[(cid, csid)]
+        if cid in cid_to_row:
+            master_row = cid_to_row[cid]
             c_range    = (f"{col_letter(next_col)}{master_row}:"
                           f"{col_letter(end_col)}{master_row}")
             cell_updates.append({"range": c_range, "values": [silo_values]})
         else:
-            base_kw    = info["base_keyword"] or f"{info['college_name']} {info['course_name']}"
-            fixed_part = [cid, csid, info["college_name"], info["course_name"], base_kw]
+            short_form = info["short_form"]
+            base_kw    = info["base_keyword"] or short_form
+            fixed_part = [cid, short_form, base_kw]
             padding    = [""] * (next_col - MASTER_FIXED_COUNT - 1)
             rows_to_append.append(fixed_part + padding + silo_values)
 

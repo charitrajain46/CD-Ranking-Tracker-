@@ -124,11 +124,9 @@ PIPELINE_LOG    = os.path.join(BASE_DIR, "pipeline_ui.log")
 app = Flask(__name__)
 
 # ── Runtime state ────────────────────────────────────────────────────────────
-_lock            = threading.Lock()
-_running         = {"pipeline": False, "quickrun": False}
-_procs           = {"pipeline": None,  "quickrun": None}   # live subprocess handles
-_next_auto_run   = ""          # ISO timestamp of next midnight auto-run
-_midnight_timer  = None        # threading.Timer handle
+_lock    = threading.Lock()
+_running = {"pipeline": False, "quickrun": False}
+_procs   = {"pipeline": None,  "quickrun": None}   # live subprocess handles
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -331,7 +329,6 @@ def api_status():
         "pipeline_running":  _running["pipeline"],
         "quickrun_running":  _running["quickrun"],
         "spreadsheet_id":    state.get("spreadsheet_id", ""),
-        "next_auto_run":     _next_auto_run,
         "next_batch_date":   next_batch_date,
         "next_batch_days":   next_batch_days,
     })
@@ -550,11 +547,57 @@ def api_terminate():
             proc.kill()   # fallback: kill just the direct process
             log.info(f"proc.kill() fallback for: {target}")
 
+        # ── Send "Pipeline aborted" email ─────────────────────
+        _send_abort_email(target)
+
         return jsonify({"message": f"⛔ {target.capitalize()} terminated. "
                                     "Data generated so far is preserved."})
     except Exception as e:
         log.warning(f"Terminate error ({target}): {e}")
         return jsonify({"error": str(e)}), 500
+
+
+def _send_abort_email(target: str):
+    """Send a brief 'Pipeline aborted' notification to all configured recipients."""
+    cfg = load_ui_config()
+    if not cfg.get("smtp_host") or not cfg.get("smtp_user"):
+        return   # SMTP not configured — skip silently
+
+    recipients = cfg.get("recipients", [])
+    if not recipients:
+        return
+
+    subject = f"⛔ Pipeline Aborted — {target.capitalize()} ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
+    body_html = f"""
+    <html><body style="font-family:sans-serif;color:#333;max-width:600px;">
+    <div style="background:#f04747;padding:20px;border-radius:10px 10px 0 0;">
+      <h2 style="color:white;margin:0;">⛔ Pipeline Aborted</h2>
+      <p style="color:#ffd0d0;margin:4px 0 0;">Collegedunia Ranking Pipeline</p>
+    </div>
+    <div style="background:#fff8f8;padding:20px;border:1px solid #ffd0d0;border-top:none;
+                border-radius:0 0 10px 10px;">
+      <p>The <b>{target.capitalize()}</b> was manually terminated at
+         <b>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</b>.</p>
+      <p>Data generated up to the termination point has been preserved in the spreadsheet.</p>
+      <p style="font-size:12px;color:#888;">Sent by Collegedunia Ranking Pipeline UI.</p>
+    </div>
+    </body></html>
+    """
+
+    for rec in recipients:
+        try:
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"]    = cfg.get("smtp_from") or cfg.get("smtp_user")
+            msg["To"]      = rec["email"]
+            msg.attach(MIMEText(body_html, "html"))
+            with smtplib.SMTP(cfg["smtp_host"], int(cfg.get("smtp_port", 587))) as srv:
+                srv.ehlo(); srv.starttls()
+                srv.login(cfg["smtp_user"], cfg["smtp_password"])
+                srv.sendmail(msg["From"], rec["email"], msg.as_string())
+            log.info(f"Abort email sent → {rec['email']}")
+        except Exception as e:
+            log.warning(f"Abort email failed → {rec.get('email', '?')}: {e}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -729,20 +772,20 @@ def _generate_rankings_pdf(rows: list, source: str) -> BytesIO:
     # ── Column widths — fill full usable page width ──────────────────
     page_w    = landscape(A4)[0] - 1.6*cm   # usable ≈ 27cm (0.8cm margins)
     id_w      = 1.8*cm
-    name_w    = 7.0*cm
-    course_w  = 4.0*cm
+    short_w   = 5.0*cm
+    kw_w      = 3.5*cm
     upd_w     = 2.8*cm
-    fixed_w   = id_w + name_w + course_w + upd_w
+    fixed_w   = id_w + short_w + kw_w + upd_w
     n_silos   = max(len(present_silos), 1)
     silo_unit = (page_w - fixed_w) / n_silos
 
-    col_widths = [id_w, name_w, course_w] + [silo_unit] * len(present_silos) + [upd_w]
+    col_widths = [id_w, short_w, kw_w] + [silo_unit] * len(present_silos) + [upd_w]
 
     # ── Header row ───────────────────────────────────────────────────
     hdr_row = [
-        Paragraph("College ID",   hdr_s),
-        Paragraph("College Name", hdr_s),
-        Paragraph("Course",       hdr_s),
+        Paragraph("College ID",  hdr_s),
+        Paragraph("Short Form",  hdr_s),
+        Paragraph("Keywords",    hdr_s),
     ]
     for st in present_silos:
         hdr_row.append(Paragraph(SILO_DISPLAY.get(st, st), hdr_s))
@@ -754,9 +797,9 @@ def _generate_rankings_pdf(rows: list, source: str) -> BytesIO:
     # Horizontal padding applied to every cell (LEFTPADDING + RIGHTPADDING).
     CELL_PAD = 8
     for row in data_raw:
-        cid    = str(row[0]).strip() if row else ""
-        cname  = str(row[2]).strip() if len(row) > 2 else ""
-        course = str(row[3]).strip() if len(row) > 3 else ""
+        cid       = str(row[0]).strip() if row else ""
+        short_frm = str(row[1]).strip() if len(row) > 1 else ""
+        keywords  = str(row[2]).strip() if len(row) > 2 else ""
 
         # Latest valid rank for each silo (most recent run column first)
         silo_vals = []
@@ -779,7 +822,7 @@ def _generate_rankings_pdf(rows: list, source: str) -> BytesIO:
                 break
 
         # Cell order must match col_widths so each value is clipped to its column.
-        raw_cells = [cid, cname, course] + silo_vals + [updated]
+        raw_cells = [cid, short_frm, keywords] + silo_vals + [updated]
         data_row = [
             Paragraph(
                 _ep(_truncate_to_width(val, col_widths[i] - CELL_PAD, "Helvetica", 7.5)),
@@ -840,7 +883,7 @@ def _detect_silo_cols(headers):
     updated_cols   = []
 
     for i, h in enumerate(headers):
-        if i <= 4:
+        if i <= 2:   # skip College_Id, Short_form, Keywords
             continue
         h_u = h.upper().replace(' ', '_')
         if 'UPDATED' in h_u:
@@ -904,7 +947,7 @@ def _build_report_data(period: str = "daily") -> dict:
 
         for row in data:
             college_id = str(row[0]).strip() if row else ""
-            keywords   = str(row[4]).strip() if len(row) > 4 else ""
+            keywords   = str(row[2]).strip() if len(row) > 2 else ""
             silo_data  = {}
             row_ranked = False
             row_nf     = False
@@ -1868,64 +1911,7 @@ def api_logs():
         return jsonify({"lines": []})
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  MIDNIGHT AUTO-RUN — Full Pipeline
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _secs_until_midnight() -> float:
-    """Seconds until next midnight IST (UTC+5:30) — works correctly on UTC servers."""
-    from datetime import timezone as _tz
-    _IST = _tz(timedelta(hours=5, minutes=30))
-    now  = datetime.now(_tz.utc).astimezone(_IST)
-    nxt  = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    return max((nxt - now).total_seconds(), 1.0)
-
-
-def _midnight_pipeline_run():
-    """Fires at midnight IST: runs run_pipeline.py, then reschedules for next midnight."""
-    global _next_auto_run
-    log.info("Midnight auto-run: Full Pipeline starting")
-    can_run = False
-    with _lock:
-        if not _running["pipeline"] and not _running["quickrun"]:
-            _running["pipeline"] = True
-            can_run = True
-
-    if can_run:
-        def _worker():
-            try:
-                cmd = [PYTHON_EXE, os.path.join(BASE_DIR, "run_pipeline.py"), "--auto"]
-                env = os.environ.copy()
-                env["PYTHONUNBUFFERED"] = "1"
-                with open(PIPELINE_LOG, "a") as lf:
-                    lf.write(
-                        f"\n[{datetime.now().isoformat()}]"
-                        f" ===== Midnight Auto-Run (Full Pipeline) START =====\n"
-                    )
-                proc = subprocess.Popen(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    cwd=BASE_DIR, env=env, text=True, bufsize=1
-                )
-                for line in proc.stdout:
-                    with open(PIPELINE_LOG, "a") as lf:
-                        lf.write(line)
-                proc.wait()
-                with open(PIPELINE_LOG, "a") as lf:
-                    lf.write(
-                        f"[{datetime.now().isoformat()}]"
-                        f" ===== Midnight Auto-Run END (rc={proc.returncode}) =====\n"
-                    )
-                log.info(f"Midnight auto-run finished (rc={proc.returncode})")
-            except Exception:
-                log.exception("Midnight auto-run error")
-            finally:
-                _running["pipeline"] = False
-        threading.Thread(target=_worker, name="midnight-autorun", daemon=True).start()
-    else:
-        log.warning("Midnight auto-run: skipped — pipeline/quickrun already running")
-
-    # Always reschedule for tomorrow midnight
-    _schedule_midnight_run()
+# ── Auto-run removed — pipeline is manual-only (run once per day via UI) ──
 
 
 @app.route("/api/reset-sheets-flag", methods=["POST"])
@@ -1943,26 +1929,6 @@ def api_reset_sheets_flag():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-def _schedule_midnight_run():
-    """(Re)schedule the midnight auto-run timer and update _next_auto_run."""
-    global _next_auto_run, _midnight_timer
-    if _midnight_timer and _midnight_timer.is_alive():
-        _midnight_timer.cancel()
-    from datetime import timezone as _tz
-    _IST = _tz(timedelta(hours=5, minutes=30))
-    secs = _secs_until_midnight()
-    nxt  = (datetime.now(_tz.utc).astimezone(_IST) + timedelta(days=1)).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
-    _next_auto_run  = nxt.isoformat()
-    _midnight_timer = threading.Timer(secs, _midnight_pipeline_run)
-    _midnight_timer.daemon = True
-    _midnight_timer.start()
-    log.info(f"Full Pipeline midnight auto-run scheduled for {_next_auto_run}")
-
-
-# Start the scheduler immediately when the module loads
-_schedule_midnight_run()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
