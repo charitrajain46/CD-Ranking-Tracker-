@@ -45,22 +45,4 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: gh secret set PIPELINE_STATE < pipeline_state.json
 
-      - name: Send email notification with result URL
-        if: always()   # Send email whether pipeline succeeded or failed
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 465
-          username: ${{ secrets.NOTIFY_EMAIL }}
-          password: ${{ secrets.NOTIFY_EMAIL_PASSWORD }}
-          to: charitra.jain@collegedunia.com
-          from: Collegedunia Pipeline Bot
-          subject: "Pipeline Run ${{ job.status == 'success' && '✅ Succeeded' || '❌ Failed' }} — ${{ github.run_id }}"
-          body: |
-            Pipeline run completed.
-
-            Status   : ${{ job.status }}
-            Run date : ${{ env.RUN_DATE }}
-
-            📊 View ranking results in Google Sheet:
-            https://docs.google.com/spreadsheets/d/1Fv9C6i3EGAwNQnYUDh1n_pJ0FV-UwfFbhUjkhh3UJD8/edit?usp=sharing
+      # Email is sent by run_pipeline.py itself via SMTP — no duplicate here.
