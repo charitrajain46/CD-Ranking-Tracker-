@@ -631,6 +631,13 @@ hr { border:none; border-top:1px solid var(--border); margin:16px 0; }
     </div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       <button class="btn btn-primary" id="btn-pipeline" onclick="runPipeline()">⚡ Start Full Pipeline</button>
+      <button class="btn" id="btn-terminate-pipeline"
+              onclick="terminatePipeline()"
+              style="display:none;background:var(--red);color:#fff;border:none;
+                     padding:9px 18px;border-radius:8px;font-weight:700;
+                     cursor:pointer;font-size:13px;">
+        ⛔ Terminate
+      </button>
       <span id="pipe-lbl" style="font-size:12px;color:var(--muted);"></span>
     </div>
   </div>
@@ -1379,9 +1386,14 @@ function stopElapsed() {
 }
 
 // ── Run Pipeline ──────────────────────────────────────────────────
+function _pipelineRunning(on) {
+  document.getElementById('btn-pipeline').disabled = on;
+  document.getElementById('btn-terminate-pipeline').style.display = on ? 'inline-flex' : 'none';
+}
+
 function runPipeline() {
   clearTerm('term-pipeline');
-  document.getElementById('btn-pipeline').disabled = true;
+  _pipelineRunning(true);
   set('psb-stage', 'Starting…'); set('psb-detail', 'Connecting to pipeline');
   set('pipe-lbl', '');
   _pipelineStart = Date.now();
@@ -1391,32 +1403,53 @@ function runPipeline() {
 
   es.onmessage = function(e) {
     appendTerm('term-pipeline', e.data, lineClass(e.data));
-    // Update stage label from output
     if (/stage 1/i.test(e.data)) { set('psb-stage','Stage 1'); set('psb-detail','Populating Intermediate'); }
     if (/stage 2/i.test(e.data)) { set('psb-stage','Stage 2'); set('psb-detail','Running Apps Script ranking'); }
     if (/stage 3/i.test(e.data)) { set('psb-stage','Stage 3'); set('psb-detail','Building Content tab'); }
   };
   es.addEventListener('done', function() {
-    es.close(); stopElapsed();
+    es.close(); stopElapsed(); _pipelineRunning(false);
     appendTerm('term-pipeline', '\n✓ Pipeline finished!', 't-ok');
-    document.getElementById('btn-pipeline').disabled = false;
     set('psb-stage','Completed'); set('psb-detail','All stages done');
     toast('Pipeline completed successfully!', 'success');
     refreshStatus();
   });
   es.addEventListener('error', function(e) {
     if (e.data) appendTerm('term-pipeline', e.data, 't-err');
-    es.close(); stopElapsed();
-    document.getElementById('btn-pipeline').disabled = false;
+    es.close(); stopElapsed(); _pipelineRunning(false);
     set('psb-stage','Finished'); set('psb-detail','Check output above');
     refreshStatus();
   });
   es.onerror = function() {
     if (es.readyState === 2) {
-      document.getElementById('btn-pipeline').disabled = false;
-        stopElapsed(); refreshStatus();
+      stopElapsed(); _pipelineRunning(false); refreshStatus();
     }
   };
+}
+
+// ── Terminate Pipeline ────────────────────────────────────────────
+function terminatePipeline() {
+  if (!confirm('Stop the running pipeline now?\nData generated so far will be preserved.')) return;
+  var btn = document.getElementById('btn-terminate-pipeline');
+  btn.disabled = true;
+  btn.textContent = 'Stopping…';
+  fetch('/api/terminate', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({target: 'pipeline'})
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    appendTerm('term-pipeline', '\n' + (d.message || d.error || 'Terminated.'), 't-err');
+    stopElapsed(); _pipelineRunning(false);
+    set('psb-stage','Terminated'); set('psb-detail','Stopped by user');
+    toast('Pipeline terminated.', 'error');
+    refreshStatus();
+  })
+  .catch(function(){
+    appendTerm('term-pipeline', '\nTerminate request failed — try pkill -f run_pipeline.py in console.', 't-err');
+    btn.disabled = false; btn.textContent = '⛔ Terminate';
+  });
 }
 
 // ── Quick Run ─────────────────────────────────────────────────────
